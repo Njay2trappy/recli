@@ -1,0 +1,57 @@
+[
+  {
+    "id": 1,
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@example.com",
+    "password": "password123",
+    "gender": "Male",
+    "username": "johndoe",
+    "createdAt": "2024-12-12T16:44:35.458Z",
+    "updatedAt": "2024-12-12T16:44:35.458Z"
+  },
+  {
+    "id": 2,
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@exuample.com",
+    "password": "password123",
+    "gender": "Male",
+    "username": "kii",
+    "createdAt": "2024-12-12T16:46:51.929Z",
+    "updatedAt": "2024-12-12T16:46:51.929Z"
+  },
+  {
+    "id": 3,
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@exuiample.com",
+    "password": "password123",
+    "gender": "Male",
+    "username": "kuuii",
+    "createdAt": "2024-12-12T16:47:32.291Z",
+    "updatedAt": "2024-12-12T16:47:32.291Z"
+  },
+  {
+    "id": 4,
+    "firstName": "ikechukwu",
+    "lastName": "ngoesina",
+    "email": "ikechukwungoesina@gmail.com",
+    "password": "Password2.",
+    "gender": "male",
+    "username": "username",
+    "createdAt": "2024-12-12T17:00:06.065Z",
+    "updatedAt": "2024-12-12T17:00:06.065Z"
+  },
+  {
+    "id": 5,
+    "firstName": "ikechukwu",
+    "lastName": "ngoesina",
+    "email": "ikechukwungtoesina@gmail.com",
+    "password": "Password2.",
+    "gender": "male",
+    "username": "username23",
+    "createdAt": "2024-12-12T17:00:29.781Z",
+    "updatedAt": "2024-12-12T17:00:29.781Z"
+  }
+]
