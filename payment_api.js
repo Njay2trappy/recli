@@ -1,5 +1,5 @@
-const { ApolloServer } = require('@apollo/server');
-const { ApolloServerPluginUsageReporting } = require('@apollo/server');
+const { ApolloServer } = require('apollo-server');
+const { ApolloServerPluginUsageReporting } = require('apollo-server-plugin-base');
 const { gql } = require('graphql-tag');
 const fs = require('fs');
 const path = require('path');
