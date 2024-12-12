@@ -3,13 +3,14 @@ const { startStandaloneServer } = require('@apollo/server/standalone');
 const { gql } = require('graphql-tag');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const Web3 = require('web3');
 const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKey } = require('@solana/web3.js');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
-// File paths for JSON storage
+// File paths for JSON storage 
 const paymentsFilePath = path.join(__dirname, 'payments.json');
 
 // Admin Wallets
@@ -65,6 +66,7 @@ const typeDefs = gql`
         createdAt: String!
         blockchain: String!
         convertedAmount: Float!
+        
     }
 
     type Query {
@@ -74,6 +76,10 @@ const typeDefs = gql`
         adminLogin(email: String!, password: String!): AdminAuthPayload!
         getAllUsers(adminToken: String!): [User!]!
         getDeletedUsers(adminToken: String!): [User!]!
+        getDeposits(userId: ID!): [Deposit!]!
+        getWalletAddresses(userId: ID!, blockchain: String!): WalletAddresses!
+        getUsers: [User!]!
+        getUserById(userId: ID!): User!
     }
 
     type Mutation {
@@ -94,6 +100,8 @@ const typeDefs = gql`
       username: String!
     ): Admin!
     deleteUser(adminToken: String!, userId: ID!): String!
+    createDeposit(userId: ID!, amount: Float!): Deposit!
+    createCustodian(username: String!, token: String!): Custodian!
     }
     type User {
     id: ID!
@@ -123,11 +131,31 @@ const typeDefs = gql`
     adminToken: String!
     admin: Admin!
   }
+  type Deposit {
+    id: ID!
+    userId: ID!
+    amount: Float!
+    createdAt: String!
+  }
+
+  type WalletAddresses {
+    bsc: String
+    solana: String
+  }
+
+  type Custodian {
+    userId: ID!
+    username: String!
+    bsc: String!
+    solana: String!
+  }
 `;
 
 // Mock database
 const users = [];
 const admins = []
+const deposits = [];
+const custodians = [];
 const saveAdminsToFile = () => {
     fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
   };
@@ -157,15 +185,45 @@ const loadDeletedUsersFromFile = () => {
     }
     return [];
   };
+  const saveDepositsToFile = () => {
+    fs.writeFileSync('deposits.json', JSON.stringify(deposits, null, 2));
+  };
+  const saveCustodiansToFile = () => {
+    fs.writeFileSync('custodian.json', JSON.stringify(custodians, null, 2));
+  };
+  const loadDepositsFromFile = () => {
+    if (fs.existsSync('deposits.json')) {
+      return JSON.parse(fs.readFileSync('deposits.json'));
+    }
+    return [];
+  };
+  const loadCustodiansFromFile = () => {
+    if (fs.existsSync('custodian.json')) {
+      return JSON.parse(fs.readFileSync('custodian.json'));
+    }
+    return [];
+  };
 
 // Load users on start
 Object.assign(users, loadUsersFromFile());
 Object.assign(deletedUsers, loadDeletedUsersFromFile());
+Object.assign(deposits, loadDepositsFromFile());
+Object.assign(custodians, loadCustodiansFromFile());
 const ADMIN_SECRET = 'adminsecretkey';
 
 // Secret for JWT
 const JWT_SECRET = 'supersecretkey';
 
+const generateBscWalletAddress = () => {
+    const web3 = new Web3();
+    const account = web3.eth.accounts.create();
+    return account.address;
+  };
+  
+  const generateSolanaWalletAddress = () => {
+    const keypair = Keypair.generate();
+    return keypair.publicKey.toBase58();
+  };
 // GraphQL Resolvers
 const resolvers = {
     Query: {
@@ -223,6 +281,36 @@ const resolvers = {
             }
             return deletedUsers;
           },
+          getDeposits: (_, { userId }) => {
+            return deposits.filter((deposit) => deposit.userId === userId);
+          },
+          getWalletAddresses: (_, { userId, blockchain }) => {
+            const custodian = custodians.find((entry) => entry.userId === userId);
+      
+            if (!custodian) {
+              throw new Error('User wallet not found');
+            }
+      
+            if (blockchain === 'BSC') {
+              return { bsc: custodian.bsc, solana: null };
+            } else if (blockchain === 'Solana') {
+              return { bsc: null, solana: custodian.solana };
+            } else {
+              throw new Error('Unsupported blockchain');
+            }
+          },
+          getUsers: () => {
+            const users = loadUsersFromFile();
+            return users;
+          },
+          getUserById: (_, { userId }) => {
+            const users = loadUsersFromFile();
+            const user = users.find((user) => user.id === userId);
+            if (!user) {
+              throw new Error('User not found');
+            }
+            return user;
+          },
     },
     Mutation: {
         generatePaymentAddress: async (_, { userId, amount, blockchain }) => {
@@ -241,6 +329,7 @@ const resolvers = {
             } else {
                 throw new Error('Unsupported blockchain');
             }
+
 
             // Fetch live conversion rate and calculate converted amount
             const livePrice = await fetchLivePrice(blockchain);
@@ -328,6 +417,43 @@ const resolvers = {
           
             return `User with ID ${userId} has been deleted.`;
           },    
+          createDeposit: (_, { userId, amount }) => {
+            if (amount <= 0) {
+              throw new Error('Deposit amount must be greater than zero');
+            }
+      
+            const newDeposit = {
+              id: (deposits.length + 1).toString(), // Ensure id is a string
+              userId,
+              amount,
+              createdAt: new Date().toISOString(),
+            };
+      
+            deposits.push(newDeposit);
+            saveDepositsToFile(); // Save to deposits.json file
+            return newDeposit;
+          },
+          createCustodian: (_, { username, token }) => {
+            if (custodians.find((entry) => entry.username === username)) {
+              throw new Error('Custodian already exists for this user');
+            }
+      
+            const userId = crypto.randomUUID(); // Generate a unique user ID
+            const bscAddress = generateBscWalletAddress();
+            const solanaAddress = generateSolanaWalletAddress();
+      
+            const newCustodian = {
+              userId,
+              username,
+              bsc: bscAddress,
+              solana: solanaAddress,
+            };
+      
+            custodians.push(newCustodian);
+            saveCustodiansToFile(); // Save to custodian.json file
+      
+            return newCustodian;
+          },
     },
 };
 

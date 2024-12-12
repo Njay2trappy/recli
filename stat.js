@@ -6,13 +6,42 @@ const fs = require('fs');
 // Define your GraphQL schema
 const typeDefs = gql`
     directive @example on FIELD_DEFINITION
-    type Query {
-    adminLogin(email: String!, password: String!): AdminAuthPayload!
-    getAllUsers(adminToken: String!): [User!]!
-    getDeletedUsers(adminToken: String!): [User!]!
-  }
+    type Payment {
+        id: ID!
+        userId: String!
+        walletAddress: String!
+        privateKey: String!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        blockchain: String!
+        convertedAmount: Float!
+        
+    }
 
-  type Mutation {
+    type Query {
+        getPayment(id: ID!): Payment
+        getPaymentsByUser(userId: String!): [Payment]
+        login(email: String!, password: String!): AuthPayload!
+        adminLogin(email: String!, password: String!): AdminAuthPayload!
+        getAllUsers(adminToken: String!): [User!]!
+        getDeletedUsers(adminToken: String!): [User!]!
+        getDeposits(userId: ID!): [Deposit!]!
+        getWalletAddresses(userId: ID!, blockchain: String!): WalletAddresses!
+        getUsers: [User!]!
+        getUserById(userId: ID!): User!
+    }
+
+    type Mutation {
+        generatePaymentAddress(userId: String!, amount: Float!, blockchain: String!): Payment
+        createUser(
+      firstName: String!,
+      lastName: String!,
+      email: String!,
+      password: String!,
+      gender: String,
+      username: String!
+    ): User!
     createAdmin(
       firstName: String!,
       lastName: String!,
@@ -21,8 +50,20 @@ const typeDefs = gql`
       username: String!
     ): Admin!
     deleteUser(adminToken: String!, userId: ID!): String!
+    createDeposit(userId: ID!, amount: Float!): Deposit!
+    createCustodian(username: String!, token: String!): Custodian!
+    }
+    type User {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    password: String!
+    gender: String
+    username: String!
+    createdAt: String!
+    updatedAt: String!
   }
-
   type Admin {
     id: ID!
     firstName: String!
@@ -32,15 +73,36 @@ const typeDefs = gql`
     createdAt: String!
   }
 
+  type AuthPayload {
+    token: String!
+    user: User!
+  }
   type AdminAuthPayload {
     adminToken: String!
     admin: Admin!
   }
+  type Deposit {
+    id: ID!
+    userId: ID!
+    amount: Float!
+    createdAt: String!
+  }
+
+  type WalletAddresses {
+    bsc: String
+    solana: String
+  }
+
+  type Custodian {
+    userId: ID!
+    username: String!
+    bsc: String!
+    solana: String!
+  }
 `;
 
 // Define resolvers (optional for schema generation)
-const resolvers = {};
-  
+const resolvers = {};  
 // Use buildSubgraphSchema if working with Apollo Federation, otherwise just use typeDefs
 const schema = buildSubgraphSchema
     ? buildSubgraphSchema({ typeDefs, resolvers })
