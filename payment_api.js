@@ -244,6 +244,8 @@ const updatePaymentStatus = (id, status) => {
 const server = new ApolloServer({
     typeDefs,
     resolvers,
+    introspection: true, // Enable introspection (required for Playground in production)
+    playground: true,    // Enable the GraphQL Playground
 });
 
 // Start the Server
