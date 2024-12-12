@@ -244,6 +244,8 @@ const updatePaymentStatus = (id, status) => {
 const server = new ApolloServer({
     typeDefs,
     resolvers,
+    introspection: true,
+    playground: true,
     plugins: [
         ApolloServerPluginUsageReporting({
             apiKey: process.env.APOLLO_KEY,
