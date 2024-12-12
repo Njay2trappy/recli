@@ -7,13 +7,14 @@
     "start": "node payment_api.js"
   },
   "dependencies": {
-    "@apollo/server": "^4.6.0",
-    "graphql": "^16.6.0",
-    "web3": "^1.9.0",
+    "@apollo/server": "^4.11.2",
     "@solana/web3.js": "^1.77.0",
     "axios": "^1.3.0",
+    "fs": "^0.0.1-security",
+    "graphql": "^16.6.0",
+    "graphql-tag": "^2.12.6",
     "uuid": "^9.0.0",
-    "fs": "^0.0.1-security"
+    "web3": "^1.9.0"
   },
   "engines": {
     "node": ">=14.0.0"
