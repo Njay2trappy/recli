@@ -1,5 +1,5 @@
-const { ApolloServer } = require('apollo-server');
-const { ApolloServerPluginUsageReporting } = require('apollo-server-plugin-base');
+const { ApolloServer } = require('@apollo/server');
+const { startStandaloneServer } = require('@apollo/server/standalone');
 const { gql } = require('graphql-tag');
 const fs = require('fs');
 const path = require('path');
@@ -245,18 +245,17 @@ const updatePaymentStatus = (id, status) => {
 const server = new ApolloServer({
     typeDefs,
     resolvers,
-    introspection: true,
+    introspection: true, // Enables introspection for Apollo Studio
     playground: true,
-    plugins: [
-        ApolloServerPluginUsageReporting({
-            apiKey: process.env.APOLLO_KEY,
-            sendReportsImmediately: true,
+});
+
+(async () => {
+    const { url } = await startStandaloneServer(server, {
+        listen: { port: 4000 },
+        context: async () => ({
+            apiKey: process.env.APOLLO_KEY, // Add Apollo Studio API key here
         }),
-    ],
-});
+    });
 
-
-// Start the Server
-server.listen().then(({ url }) => {
     console.log(`🚀 Server ready at ${url}`);
-});
+})();
