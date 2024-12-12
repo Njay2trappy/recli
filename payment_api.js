@@ -1,5 +1,5 @@
 const { ApolloServer, gql } = require('apollo-server');
-const { ApolloServerPluginUsageReporting } = require('apollo-server-plugin-base');
+const { ApolloServerPluginUsageReporting } = require('@apollo/server-plugin-usage-reporting');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
