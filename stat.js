@@ -6,85 +6,41 @@ const fs = require('fs');
 // Define your GraphQL schema
 const typeDefs = gql`
     directive @example on FIELD_DEFINITION
-
-    type Payment {
-        id: ID!
-        userId: String!
-        walletAddress: String!
-        privateKey: String!
-        amount: Float!
-        status: String!
-        createdAt: String!
-        blockchain: String!
-        convertedAmount: Float!
-    }
-
     type Query {
-        getPayment(id: ID!): Payment
-        getPaymentsByUser(userId: String!): [Payment]
-    }
+    adminLogin(email: String!, password: String!): AdminAuthPayload!
+    getAllUsers(adminToken: String!): [User!]!
+    getDeletedUsers(adminToken: String!): [User!]!
+  }
 
-    type Mutation {
-        generatePaymentAddress(userId: String!, amount: Float!, blockchain: String!): Payment
-    }
+  type Mutation {
+    createAdmin(
+      firstName: String!,
+      lastName: String!,
+      email: String!,
+      password: String!,
+      username: String!
+    ): Admin!
+    deleteUser(adminToken: String!, userId: ID!): String!
+  }
+
+  type Admin {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    username: String!
+    createdAt: String!
+  }
+
+  type AdminAuthPayload {
+    adminToken: String!
+    admin: Admin!
+  }
 `;
 
 // Define resolvers (optional for schema generation)
-const resolvers = {
-    Query: {
-        getPayment: (_, { id }) => {
-            const payments = readPayments();
-            return payments.find(payment => payment.id === id) || null;
-        },
-        getPaymentsByUser: (_, { userId }) => {
-            const payments = readPayments();
-            return payments.filter(payment => payment.userId === userId);
-        },
-    },
-    Mutation: {
-        generatePaymentAddress: async (_, { userId, amount, blockchain }) => {
-            const payments = readPayments();
-            let walletAddress, privateKey;
-
-            // Generate wallet address
-            if (blockchain === 'BSC') {
-                const account = web3.eth.accounts.create();
-                walletAddress = account.address;
-                privateKey = account.privateKey;
-            } else if (blockchain === 'Solana') {
-                const keypair = Keypair.generate();
-                walletAddress = keypair.publicKey.toBase58();
-                privateKey = Buffer.from(keypair.secretKey).toString('hex');
-            } else {
-                throw new Error('Unsupported blockchain');
-            }
-
-            // Fetch live conversion rate and calculate converted amount
-            const livePrice = await fetchLivePrice(blockchain);
-            const convertedAmount = amount / livePrice;
-
-            const newPayment = {
-                id: uuidv4(),
-                userId,
-                walletAddress,
-                privateKey,
-                amount,
-                convertedAmount,
-                status: 'Pending',
-                createdAt: new Date().toISOString(),
-                blockchain,
-            };
-
-            payments.push(newPayment);
-            writePayments(payments);
-
-            monitorPayment(newPayment);
-
-            return newPayment;
-        },
-    },
-};
-
+const resolvers = {};
+  
 // Use buildSubgraphSchema if working with Apollo Federation, otherwise just use typeDefs
 const schema = buildSubgraphSchema
     ? buildSubgraphSchema({ typeDefs, resolvers })

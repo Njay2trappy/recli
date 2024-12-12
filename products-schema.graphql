@@ -1,5 +1,3 @@
-directive @example on FIELD_DEFINITION
-
 directive @key(fields: _FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
 
 directive @requires(fields: _FieldSet!) on FIELD_DEFINITION
@@ -12,26 +10,49 @@ directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFAC
 
 directive @extends on OBJECT | INTERFACE
 
-type Payment {
-  id: ID!
-  userId: String!
-  walletAddress: String!
-  privateKey: String!
-  amount: Float!
-  status: String!
-  createdAt: String!
-  blockchain: String!
-  convertedAmount: Float!
-}
-
 type Query {
-  getPayment(id: ID!): Payment
-  getPaymentsByUser(userId: String!): [Payment]
+  login(email: String!, password: String!): AuthPayload!
+  adminLogin(email: String!, password: String!): AdminAuthPayload!
+  getAllUsers(adminToken: String!): [User!]!
+  getDeletedUsers(adminToken: String!): [User!]!
   _service: _Service!
 }
 
 type Mutation {
-  generatePaymentAddress(userId: String!, amount: Float!, blockchain: String!): Payment
+  createUser(firstName: String!, lastName: String!, email: String!, password: String!, gender: String, username: String!): User!
+  createAdmin(firstName: String!, lastName: String!, email: String!, password: String!, username: String!): Admin!
+  deleteUser(adminToken: String!, userId: ID!): String!
+}
+
+type User {
+  id: ID!
+  firstName: String!
+  lastName: String!
+  email: String!
+  password: String!
+  gender: String
+  username: String!
+  createdAt: String!
+  updatedAt: String!
+}
+
+type Admin {
+  id: ID!
+  firstName: String!
+  lastName: String!
+  email: String!
+  username: String!
+  createdAt: String!
+}
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+type AdminAuthPayload {
+  adminToken: String!
+  admin: Admin!
 }
 
 scalar _FieldSet

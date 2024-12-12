@@ -1,0 +1,11 @@
+[
+  {
+    "id": "1",
+    "firstName": "Adminuser",
+    "lastName": "king Admin",
+    "email": "admin@gmail.com",
+    "username": "ADMIN",
+    "password": "Powershell",
+    "createdAt": "2024-12-12T21:35:01.264Z"
+  }
+]

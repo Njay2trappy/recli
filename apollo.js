@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const Web3 = require('web3');
 const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKey } = require('@solana/web3.js');
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
 
 // File paths for JSON storage
 const paymentsFilePath = path.join(__dirname, 'payments.json');
@@ -65,14 +66,105 @@ const typeDefs = gql`
         blockchain: String!
         convertedAmount: Float!
     }
+
     type Query {
         getPayment(id: ID!): Payment
         getPaymentsByUser(userId: String!): [Payment]
+        login(email: String!, password: String!): AuthPayload!
+        adminLogin(email: String!, password: String!): AdminAuthPayload!
+        getAllUsers(adminToken: String!): [User!]!
+        getDeletedUsers(adminToken: String!): [User!]!
     }
+
     type Mutation {
         generatePaymentAddress(userId: String!, amount: Float!, blockchain: String!): Payment
+        createUser(
+      firstName: String!,
+      lastName: String!,
+      email: String!,
+      password: String!,
+      gender: String,
+      username: String!
+    ): User!
+    createAdmin(
+      firstName: String!,
+      lastName: String!,
+      email: String!,
+      password: String!,
+      username: String!
+    ): Admin!
+    deleteUser(adminToken: String!, userId: ID!): String!
     }
+    type User {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    password: String!
+    gender: String
+    username: String!
+    createdAt: String!
+    updatedAt: String!
+  }
+  type Admin {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    username: String!
+    createdAt: String!
+  }
+
+  type AuthPayload {
+    token: String!
+    user: User!
+  }
+  type AdminAuthPayload {
+    adminToken: String!
+    admin: Admin!
+  }
 `;
+
+// Mock database
+const users = [];
+const admins = []
+const saveAdminsToFile = () => {
+    fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
+  };
+  
+  const loadAdminsFromFile = () => {
+    if (fs.existsSync('admins.json')) {
+      return JSON.parse(fs.readFileSync('admins.json'));
+    }
+    return [];
+  };
+  
+  // Load admins on start
+  Object.assign(admins, loadAdminsFromFile());
+const deletedUsers = [];
+const saveUsersToFile = () => {
+  fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
+};
+const loadUsersFromFile = () => {
+  if (fs.existsSync('users.json')) {
+    return JSON.parse(fs.readFileSync('users.json'));
+  }
+  return [];
+};
+const loadDeletedUsersFromFile = () => {
+    if (fs.existsSync('spam.json')) {
+      return JSON.parse(fs.readFileSync('spam.json'));
+    }
+    return [];
+  };
+
+// Load users on start
+Object.assign(users, loadUsersFromFile());
+Object.assign(deletedUsers, loadDeletedUsersFromFile());
+const ADMIN_SECRET = 'adminsecretkey';
+
+// Secret for JWT
+const JWT_SECRET = 'supersecretkey';
 
 // GraphQL Resolvers
 const resolvers = {
@@ -85,6 +177,52 @@ const resolvers = {
             const payments = readPayments();
             return payments.filter(payment => payment.userId === userId);
         },
+        login: (_, { email, password }) => {
+            const user = users.find((user) => user.email === email);
+            if (!user) {
+              throw new Error('User not found');
+            }
+      
+            if (user.password !== password) {
+              throw new Error('Invalid password');
+            }
+      
+            const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
+              expiresIn: '1h',
+            });
+      
+            return { token, user: { ...user, password: null } }; // Omit password from response
+          },
+          adminLogin: (_, { email, password }) => {
+            const admin = admins.find((admin) => admin.email === email);
+            if (!admin) {
+              throw new Error('Admin not found');
+            }
+      
+            if (admin.password !== password) {
+              throw new Error('Invalid password');
+            }
+      
+            const adminToken = jwt.sign({ id: admin.id, email: admin.email }, ADMIN_SECRET, {
+              expiresIn: '10m',
+            });
+      
+            return { adminToken, admin };
+          },
+          getAllUsers: (_, { adminToken }) => {
+            const admin = jwt.verify(adminToken, ADMIN_SECRET);
+            if (!admin) {
+              throw new Error('Invalid admin token');
+            }
+            return users.map((user) => ({ ...user, password: null }));
+          },
+          getDeletedUsers: (_, { adminToken }) => {
+            const admin = jwt.verify(adminToken, ADMIN_SECRET);
+            if (!admin) {
+              throw new Error('Invalid admin token');
+            }
+            return deletedUsers;
+          },
     },
     Mutation: {
         generatePaymentAddress: async (_, { userId, amount, blockchain }) => {
@@ -127,6 +265,69 @@ const resolvers = {
 
             return newPayment;
         },
+        createUser: (_, { firstName, lastName, email, password, gender, username }) => {
+            if (users.find((user) => user.email === email)) {
+              throw new Error('User already exists');
+            }
+      
+            const newUser = {
+              id: (users.length + 1).toString(), // Ensure id is a string
+              firstName,
+              lastName,
+              email,
+              password,
+              gender,
+              username,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+      
+            users.push(newUser);
+            saveUsersToFile();
+            return { ...newUser, password: null }; // Return user without password
+          },
+          createAdmin: async (_, { firstName, lastName, email, password, username }) => {
+            if (admins.find((admin) => admin.email === email)) {
+              throw new Error('Admin already exists');
+            }
+          
+            const newAdmin = {
+              id: (admins.length + 1).toString(),
+              firstName,
+              lastName,
+              email,
+              username,
+              password, // Store as plaintext or hashed for security
+              createdAt: new Date().toISOString(),
+            };
+          
+            admins.push(newAdmin);
+            saveAdminsToFile(); // Save admin details to the file
+          
+            return newAdmin;
+          },      
+        deleteUser: (_, { adminToken, userId }) => {
+            const admin = jwt.verify(adminToken, ADMIN_SECRET);
+            if (!admin) {
+              throw new Error('Invalid admin token');
+            }
+          
+            const usersFromFile = loadUsersFromFile(); // Dynamically load the users from the file
+            const userIndex = usersFromFile.findIndex((user) => user.id === userId);
+          
+            if (userIndex === -1) {
+              throw new Error('User not found');
+            }
+          
+            const [removedUser] = usersFromFile.splice(userIndex, 1); // Remove the user
+            deletedUsers.push(removedUser);
+          
+            // Save updated users and deleted users to their respective files
+            fs.writeFileSync('users.json', JSON.stringify(usersFromFile, null, 2));
+            saveDeletedUsersToFile();
+          
+            return `User with ID ${userId} has been deleted.`;
+          },    
     },
 };
 
@@ -251,12 +452,9 @@ const server = new ApolloServer({
     const { url } = await startStandaloneServer(server, {
         listen: { port: 4000 },
         context: async () => ({
-            apiKey: 'user:gh.0ba788a5-a19b-4090-bd54-3e5b198e984a:uqT7A8iJMPNgBl4LdV-4VQ'  // Add Apollo Studio API key here
+            apiKey: ''  // Add Apollo Studio API key here
         }),
     });
 
-    // Start the Server
-server.listen().then(({ url }) => {
     console.log(`🚀 Server ready at ${url}`);
-});
 })();

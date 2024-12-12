@@ -2,14 +2,15 @@
   "name": "payment-api",
   "version": "1.0.0",
   "description": "GraphQL Payment API with Binance Smart Chain (BSC) and Solana support",
-  "main": "payment_api.js",
+  "main": "apollo.js",
   "scripts": {
-    "start": "node payment_api.js"
+    "start": "node apollo.js"
   },
   "dependencies": {
     "@apollo/server": "^4.11.2",
-    "apollo-server": "^3.11.1",
+    "@apollo/subgraph": "^2.9.3",
     "@solana/web3.js": "^1.77.0",
+    "apollo-server": "^3.11.1",
     "axios": "^1.3.0",
     "brcypt": "^1.0.1",
     "fs": "^0.0.1-security",
