@@ -1,0 +1,17 @@
+{
+  "name": "payment-api",
+  "version": "1.0.0",
+  "main": "payment_api.js",
+  "scripts": {
+    "start": "node payment_api.js"
+  },
+  "dependencies": {
+    "apollo-server": "^3.10.0",
+    "uuid": "^8.3.2",
+    "fs": "^0.0.1-security",
+    "path": "^0.12.7",
+    "web3": "^1.7.0",
+    "@solana/web3.js": "^1.77.1",
+    "axios": "^1.5.0"
+  }
+}
