@@ -1,4 +1,5 @@
 const { ApolloServer, gql } = require('apollo-server');
+const { ApolloServerPluginUsageReporting } = require('apollo-server-plugin-base');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -240,16 +241,15 @@ const updatePaymentStatus = (id, status) => {
     }
 };
 
-// Apollo Server Setup
 const server = new ApolloServer({
     typeDefs,
     resolvers,
-    introspection: true, // Enable introspection for production
-    playground: {
-        settings: {
-            "request.credentials": "include" // Allow cookies and credentials
-        },
-    }, // Explicitly enable the GraphQL Playground
+    plugins: [
+        ApolloServerPluginUsageReporting({
+            apiKey: process.env.APOLLO_KEY,
+            sendReportsImmediately: true,
+        }),
+    ],
 });
 
 

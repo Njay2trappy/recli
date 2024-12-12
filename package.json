@@ -6,12 +6,14 @@
     "start": "node payment_api.js"
   },
   "dependencies": {
-    "apollo-server": "^3.10.0",
-    "uuid": "^8.3.2",
+    "@apollo/subgraph": "^2.9.3",
+    "@solana/web3.js": "^1.77.1",
+    "apollo-server": "^3.13.0",
+    "apollo-server-plugin-base": "^3.7.2",
+    "axios": "^1.5.0",
     "fs": "^0.0.1-security",
     "path": "^0.12.7",
-    "web3": "^1.7.0",
-    "@solana/web3.js": "^1.77.1",
-    "axios": "^1.5.0"
+    "uuid": "^8.3.2",
+    "web3": "^1.7.0"
   }
 }
