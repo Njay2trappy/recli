@@ -53,5 +53,45 @@
     "username": "username23",
     "createdAt": "2024-12-12T17:00:29.781Z",
     "updatedAt": "2024-12-12T17:00:29.781Z"
+  },
+  {
+    "id": 6,
+    "firstName": "ike",
+    "lastName": "okec",
+    "email": "ik@gmail.com",
+    "password": "tester123",
+    "username": "killerbean",
+    "createdAt": "2024-12-12T18:10:13.919Z",
+    "updatedAt": "2024-12-12T18:10:13.919Z"
+  },
+  {
+    "id": 7,
+    "firstName": "ike",
+    "lastName": "okec",
+    "email": "ik@gmkail.com",
+    "password": "tester123",
+    "username": "starts",
+    "createdAt": "2024-12-12T18:11:37.444Z",
+    "updatedAt": "2024-12-12T18:11:37.444Z"
+  },
+  {
+    "id": 8,
+    "firstName": "null",
+    "lastName": "null",
+    "email": "null",
+    "password": "null",
+    "username": "null",
+    "createdAt": "2024-12-12T18:16:34.137Z",
+    "updatedAt": "2024-12-12T18:16:34.137Z"
+  },
+  {
+    "id": 9,
+    "firstName": "hdhdh",
+    "lastName": "dhdhhd",
+    "email": "dhhdhd",
+    "password": "startsyuu",
+    "username": "hdhhh",
+    "createdAt": "2024-12-12T18:16:58.944Z",
+    "updatedAt": "2024-12-12T18:16:58.944Z"
   }
 ]

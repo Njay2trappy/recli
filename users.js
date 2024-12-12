@@ -1,4 +1,6 @@
-const { ApolloServer, gql } = require('apollo-server');
+const { ApolloServer } = require('@apollo/server');
+const { startStandaloneServer } = require('@apollo/server/standalone');
+const { gql } = require('graphql-tag');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 
@@ -104,11 +106,18 @@ const resolvers = {
 const server = new ApolloServer({
     typeDefs,
     resolvers,
-    introspection: true, // Allows introspection queries
-    playground: true,   // Enables GraphQL Playground in production
-  });
-  
-// Start the server
-server.listen().then(({ url }) => {
-  console.log(`🚀 Server ready at ${url}`);
+    introspection: true, // Enables introspection for Apollo Studio
+    playground: true,    // Enables GraphQL Playground
 });
+
+(async () => {
+    const { url } = await startStandaloneServer(server, {
+        listen: { port: process.env.PORT || 4001 }, // Use the platform's assigned port or default to 4000
+        context: async () => ({
+            apiKey: process.env.APOLLO_KEY || null, // Optional: Apollo Studio API key
+        }),
+    });
+
+    console.log(`🚀 Server ready at ${url}`);
+})();
+

@@ -11,4 +11,3 @@ const script2 = spawn('node', ['users.js']);
 script2.stdout.on('data', (data) => console.log(`Script2 Output: ${data}`));
 script2.stderr.on('data', (data) => console.error(`Script2 Error: ${data}`));
 script2.on('close', (code) => console.log(`Script2 exited with code ${code}`));
-

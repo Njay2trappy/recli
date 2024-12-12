@@ -7,6 +7,7 @@ const { v4: uuidv4 } = require('uuid');
 const Web3 = require('web3');
 const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKey } = require('@solana/web3.js');
 const axios = require('axios');
+const jwt = require('jsonwebtoken');
 
 // File paths for JSON storage
 const paymentsFilePath = path.join(__dirname, 'payments.json');
@@ -69,12 +70,55 @@ const typeDefs = gql`
     type Query {
         getPayment(id: ID!): Payment
         getPaymentsByUser(userId: String!): [Payment]
+        login(email: String!, password: String!): AuthPayload!
     }
 
     type Mutation {
         generatePaymentAddress(userId: String!, amount: Float!, blockchain: String!): Payment
+        createUser(
+      firstName: String!,
+      lastName: String!,
+      email: String!,
+      password: String!,
+      gender: String,
+      username: String!
+    ): User!
     }
+    type User {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    password: String!
+    gender: String
+    username: String!
+    createdAt: String!
+    updatedAt: String!
+  }
+
+  type AuthPayload {
+    token: String!
+    user: User!
+  }
 `;
+
+// Mock database
+const users = [];
+const saveUsersToFile = () => {
+  fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
+};
+const loadUsersFromFile = () => {
+  if (fs.existsSync('users.json')) {
+    return JSON.parse(fs.readFileSync('users.json'));
+  }
+  return [];
+};
+
+// Load users on start
+Object.assign(users, loadUsersFromFile());
+
+// Secret for JWT
+const JWT_SECRET = 'supersecretkey';
 
 // GraphQL Resolvers
 const resolvers = {
@@ -87,6 +131,22 @@ const resolvers = {
             const payments = readPayments();
             return payments.filter(payment => payment.userId === userId);
         },
+        login: (_, { email, password }) => {
+            const user = users.find((user) => user.email === email);
+            if (!user) {
+              throw new Error('User not found');
+            }
+      
+            if (user.password !== password) {
+              throw new Error('Invalid password');
+            }
+      
+            const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
+              expiresIn: '1h',
+            });
+      
+            return { token, user };
+          },
     },
     Mutation: {
         generatePaymentAddress: async (_, { userId, amount, blockchain }) => {
@@ -129,6 +189,27 @@ const resolvers = {
 
             return newPayment;
         },
+        createUser: (_, { firstName, lastName, email, password, gender, username }) => {
+            if (users.find((user) => user.email === email)) {
+              throw new Error('User already exists');
+            }
+      
+            const newUser = {
+              id: users.length + 1,
+              firstName,
+              lastName,
+              email,
+              password,
+              gender,
+              username,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+      
+            users.push(newUser);
+            saveUsersToFile();
+            return { ...newUser, password: null }; // Return user without password
+          },
     },
 };
 
@@ -251,9 +332,9 @@ const server = new ApolloServer({
 
 (async () => {
     const { url } = await startStandaloneServer(server, {
-        listen: { port: 4000 },
+        listen: { port: 40002 },
         context: async () => ({
-            apiKey: process.env.APOLLO_KEY,  // Add Apollo Studio API key here
+            apiKey: ''  // Add Apollo Studio API key here
         }),
     });
 
