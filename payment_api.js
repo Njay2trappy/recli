@@ -253,7 +253,7 @@ const server = new ApolloServer({
     const { url } = await startStandaloneServer(server, {
         listen: { port: 4000 },
         context: async () => ({
-            apiKey: 'user:gh.0ba788a5-a19b-4090-bd54-3e5b198e984a:uqT7A8iJMPNgBl4LdV-4VQ'  // Add Apollo Studio API key here
+            apiKey: process.env.APOLLO_KEY,  // Add Apollo Studio API key here
         }),
     });
 
