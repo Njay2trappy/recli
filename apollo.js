@@ -77,6 +77,7 @@ const typeDefs = gql`
         generateOTP(email: String!): OTPResponse!
         getAllUsers(adminToken: String!): [User!]!
         getDeletedUsers(adminToken: String!): [User!]!
+        getToken(username: String!): String!
         getDeposits(userId: ID!): [Deposit!]!
         getWalletAddresses(userId: ID!, blockchain: String!): WalletAddresses!
         getUsers: [User!]!
@@ -104,6 +105,7 @@ const typeDefs = gql`
       username: String!
     ): Admin!
     deleteUser(adminToken: String!, userId: ID!): String!
+    logout(token: String!): String!
     createDeposit(userId: ID!, amount: Float!): Deposit!
     createCustodian(username: String!, token: String!): Custodian!
     updateTransactionStatus(adminToken: String!, transactionId: ID!, status: String!): Transaction!
@@ -178,6 +180,39 @@ const typeDefs = gql`
 // Mock database
 const users = [];
 const admins = []
+const activeTokens = new Set();
+const tokensFile = 'tokens.json';
+
+const saveTokensToFile = () => {
+  fs.writeFileSync(tokensFile, JSON.stringify([...activeTokens], null, 2));
+};
+
+const loadTokensFromFile = () => {
+  if (fs.existsSync(tokensFile)) {
+    return new Set(JSON.parse(fs.readFileSync(tokensFile)));
+  }
+  return new Set();
+};
+
+activeTokens.add(...loadTokensFromFile());
+
+const revokeToken = (token) => {
+  activeTokens.delete(token);
+  saveTokensToFile();
+};
+// Helper function to validate token
+const validateToken = (token, secret) => {
+    if (!activeTokens.has(token)) {
+      throw new Error('Token is invalid or has expired');
+    }
+  
+    try {
+      return jwt.verify(token, secret);
+    } catch (err) {
+      revokeToken(token); // Remove expired token
+      throw new Error('Token is invalid or has expired');
+    }
+  };
 const deposits = [];
 const custodians = [];
 
@@ -195,7 +230,7 @@ const loadAdminsFromFile = () => {
 };
   
   // Load admins on start
-  Object.assign(admins, loadAdminsFromFile());
+Object.assign(admins, loadAdminsFromFile());
 const deletedUsers = [];
 const saveUsersToFile = () => {
   fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
@@ -303,9 +338,21 @@ const resolvers = {
               throw new Error('Invalid password');
             }
       
+            const existingToken = [...activeTokens].find((token) => {
+              const decoded = jwt.decode(token);
+              return decoded?.email === email;
+            });
+      
+            if (existingToken) {
+              throw new Error('User is already logged in');
+            }
+      
             const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
               expiresIn: '1h',
             });
+      
+            activeTokens.add(token);
+            saveTokensToFile();
       
             return { token, user: { ...user, password: null } }; // Omit password from response
         },
@@ -319,25 +366,53 @@ const resolvers = {
               throw new Error('Invalid password');
             }
       
-            const adminToken = jwt.sign({ id: admin.id, email: admin.email }, ADMIN_SECRET, {
-              expiresIn: '10m',
+            const existingToken = [...activeTokens].find((token) => {
+              const decoded = jwt.decode(token);
+              return decoded?.email === email;
             });
+      
+            if (existingToken) {
+              throw new Error('Admin is already logged in');
+            }
+      
+            const adminToken = jwt.sign({ id: admin.id, email: admin.email }, ADMIN_SECRET, {
+              expiresIn: '1h',
+            });
+      
+            activeTokens.add(adminToken);
+            saveTokensToFile();
       
             return { adminToken, admin };
         },
-        getAllUsers: (_, { adminToken }) => {
-            const admin = jwt.verify(adminToken, ADMIN_SECRET);
-            if (!admin) {
-              throw new Error('Invalid admin token');
+        getAllUsers: (_, { adminToken }, context) => {
+            const token = adminToken || context.token;
+            if (!token) {
+              throw new Error('Admin token is required');
             }
+      
+            const admin = validateToken(token, ADMIN_SECRET);
             return users.map((user) => ({ ...user, password: null }));
         },
-        getDeletedUsers: (_, { adminToken }) => {
-            const admin = jwt.verify(adminToken, ADMIN_SECRET);
-            if (!admin) {
-              throw new Error('Invalid admin token');
+        getDeletedUsers: (_, { adminToken }, context) => {
+            const token = adminToken || context.token;
+            if (!token) {
+              throw new Error('Admin token is required');
             }
+      
+            const admin = validateToken(token, ADMIN_SECRET);
             return deletedUsers;
+        },
+        getToken: (_, { username }) => {
+            const token = [...activeTokens].find((t) => {
+              const decoded = jwt.decode(t);
+              return decoded?.username === username;
+            });
+      
+            if (!token) {
+              throw new Error('No active token found for this username');
+            }
+      
+            return token;
         },
         getDeposits: (_, { userId }) => {
             return deposits.filter((deposit) => deposit.userId === userId);
@@ -468,8 +543,8 @@ const resolvers = {
             users.push(newUser);
             saveUsersToFile();
             return { ...newUser, password: null }; // Return user without password
-          },
-          createAdmin: async (_, { firstName, lastName, email, password, username }) => {
+        },
+        createAdmin: async (_, { firstName, lastName, email, password, username }) => {
             if (admins.find((admin) => admin.email === email)) {
               throw new Error('Admin already exists');
             }
@@ -488,13 +563,14 @@ const resolvers = {
             saveAdminsToFile(); // Save admin details to the file
           
             return newAdmin;
-          },      
-        deleteUser: (_, { adminToken, userId }) => {
-            const admin = jwt.verify(adminToken, ADMIN_SECRET);
-            if (!admin) {
-              throw new Error('Invalid admin token');
+        },      
+        deleteUser: (_, { adminToken, userId }, context) => {
+            const token = adminToken || context.token;
+            if (!token) {
+              throw new Error('Admin token is required');
             }
-          
+    
+            const admin = validateToken(token, ADMIN_SECRET);
             const usersFromFile = loadUsersFromFile(); // Dynamically load the users from the file
             const userIndex = usersFromFile.findIndex((user) => user.id === userId);
           
@@ -510,8 +586,16 @@ const resolvers = {
             saveDeletedUsersToFile();
           
             return `User with ID ${userId} has been deleted.`;
-          },    
-          createDeposit: (_, { userId, amount }) => {
+        },
+        logout: (_, { token }) => {
+            if (!activeTokens.has(token)) {
+              throw new Error('Invalid or expired token');
+            }
+      
+            revokeToken(token);
+            return 'Successfully logged out';
+        },
+        createDeposit: (_, { userId, amount }) => {
             if (amount <= 0) {
               throw new Error('Deposit amount must be greater than zero');
             }
@@ -526,8 +610,8 @@ const resolvers = {
             deposits.push(newDeposit);
             saveDepositsToFile(); // Save to deposits.json file
             return newDeposit;
-          },
-          createCustodian: (_, { username, token }) => {
+        },
+        createCustodian: (_, { username, token }) => {
             if (custodians.find((entry) => entry.username === username)) {
               throw new Error('Custodian already exists for this user');
             }
@@ -547,8 +631,8 @@ const resolvers = {
             saveCustodiansToFile(); // Save to custodian.json file
       
             return newCustodian;
-          },
-          updateTransactionStatus: (_, { adminToken, transactionId, status }) => {
+        },
+        updateTransactionStatus: (_, { adminToken, transactionId, status }) => {
             const decoded = jwt.verify(adminToken, ADMIN_SECRET);
             const admin = admins.find((a) => a.id === decoded.id);
       
@@ -564,9 +648,8 @@ const resolvers = {
             transaction.status = status;
             saveTransactionsToFile();
             return transaction;
-          },
-      
-          topUpAccount: (_, { adminToken, username, amount }) => {
+        },
+        topUpAccount: (_, { adminToken, username, amount }) => {
             const decoded = jwt.verify(adminToken, ADMIN_SECRET);
             const admin = admins.find((a) => a.id === decoded.id);
       
@@ -594,15 +677,8 @@ const resolvers = {
             transactions.push(newTransaction);
             saveTransactionsToFile();
             return newTransaction;
-          },
-          generateOTP: (_, { email }) => {
-            const isAdmin = admins.some((a) => a.email === email);
-            return generateOTP(email, isAdmin);
-          },
         },
-      
-        Mutation: {
-          changeUserPassword: (_, { token, otp, oldPassword, newPassword }) => {
+        changeUserPassword: (_, { token, otp, oldPassword, newPassword }) => {
             if (!token && !otp) {
               throw new Error('Either token or OTP must be provided');
             }
@@ -641,9 +717,8 @@ const resolvers = {
             user.password = newPassword;
             saveUsersToFile();
             return 'User password changed successfully';
-          },
-      
-          changeAdminPassword: (_, { adminToken, otp, oldPassword, newPassword }) => {
+        },
+        changeAdminPassword: (_, { adminToken, otp, oldPassword, newPassword }) => {
             if (!adminToken && !otp) {
               throw new Error('Either adminToken or OTP must be provided');
             }
@@ -682,9 +757,8 @@ const resolvers = {
             admin.password = newPassword;
             saveAdminsToFile();
             return 'Admin password changed successfully';
-          },
-      
-          changeUserEmail: (_, { token, otp, newEmail }) => {
+        },
+        changeUserEmail: (_, { token, otp, newEmail }) => {
             if (!token || !otp) {
               throw new Error('Both token and OTP must be provided');
             }
@@ -711,7 +785,7 @@ const resolvers = {
             delete otpStore[otp];
       
             return 'User email changed successfully';
-          },         
+        },         
     },
 };
 
@@ -830,6 +904,10 @@ const server = new ApolloServer({
     resolvers,
     introspection: true, // Enables introspection for Apollo Studio
     playground: true,
+    context: ({ req }) => {
+        const token = req.headers.authorization || null;
+        return { token };
+    },
 });
 
 (async () => {

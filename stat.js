@@ -8,30 +8,11 @@ const typeDefs = gql`
     directive @example on FIELD_DEFINITION
     
     type Query {
-    generateOTP(email: String!): OTPResponse!
+      getToken(username: String!): String!
   }
 
   type Mutation {
-    changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
-    changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
-    changeUserEmail(token: String, otp: String, newEmail: String!): String!
-  }
-
-  type OTPResponse {
-    otp: String!
-    expiry: String!
-  }
-
-  type User {
-    id: ID!
-    username: String!
-    email: String!
-  }
-
-  type Admin {
-    id: ID!
-    username: String!
-    email: String!
+    logout(token: String!): String!
   }
 `;
 
