@@ -236,7 +236,7 @@ const server = new ApolloServer({
 
 (async () => {
   const { url } = await startStandaloneServer(server, {
-    listen: { port: process.env.PORT || 4001 }, // Use the platform's assigned port or default to 4001
+    listen: { port: process.env.PORT || 4000 }, // Use the platform's assigned port or default to 4001
   });
 
   console.log(`\uD83D\uDE80 Server ready at ${url}`);

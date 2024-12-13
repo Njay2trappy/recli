@@ -74,6 +74,7 @@ const typeDefs = gql`
         getPaymentsByUser(userId: String!): [Payment]
         login(email: String!, password: String!): AuthPayload!
         adminLogin(email: String!, password: String!): AdminAuthPayload!
+        generateOTP(email: String!): OTPResponse!
         getAllUsers(adminToken: String!): [User!]!
         getDeletedUsers(adminToken: String!): [User!]!
         getDeposits(userId: ID!): [Deposit!]!
@@ -107,6 +108,9 @@ const typeDefs = gql`
     createCustodian(username: String!, token: String!): Custodian!
     updateTransactionStatus(adminToken: String!, transactionId: ID!, status: String!): Transaction!
     topUpAccount(adminToken: String!, username: String!, amount: Float!): Transaction!
+    changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
+    changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
+    changeUserEmail(token: String, otp: String, newEmail: String!): String!
     }
     type User {
     id: ID!
@@ -131,6 +135,10 @@ const typeDefs = gql`
   type AuthPayload {
     token: String!
     user: User!
+  }
+  type OTPResponse {
+    otp: String!
+    expiry: String!
   }
   type AdminAuthPayload {
     adminToken: String!
@@ -172,16 +180,19 @@ const users = [];
 const admins = []
 const deposits = [];
 const custodians = [];
+
+let otpStore = {}; // Temporary store for OTPs
+
 const saveAdminsToFile = () => {
     fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
-  };
+};
   
-  const loadAdminsFromFile = () => {
+const loadAdminsFromFile = () => {
     if (fs.existsSync('admins.json')) {
       return JSON.parse(fs.readFileSync('admins.json'));
     }
     return [];
-  };
+};
   
   // Load admins on start
   Object.assign(admins, loadAdminsFromFile());
@@ -200,28 +211,52 @@ const loadDeletedUsersFromFile = () => {
       return JSON.parse(fs.readFileSync('spam.json'));
     }
     return [];
-  };
-  const saveDepositsToFile = () => {
+};
+
+const saveDepositsToFile = () => {
     fs.writeFileSync('deposits.json', JSON.stringify(deposits, null, 2));
-  };
-  const saveCustodiansToFile = () => {
+};
+const saveCustodiansToFile = () => {
     fs.writeFileSync('custodian.json', JSON.stringify(custodians, null, 2));
-  };
-  const loadDepositsFromFile = () => {
+};
+const loadDepositsFromFile = () => {
     if (fs.existsSync('deposits.json')) {
       return JSON.parse(fs.readFileSync('deposits.json'));
     }
     return [];
-  };
-  const loadCustodiansFromFile = () => {
+};
+const loadCustodiansFromFile = () => {
     if (fs.existsSync('custodian.json')) {
       return JSON.parse(fs.readFileSync('custodian.json'));
     }
     return [];
-  };
-  const saveTransactionsToFile = () => {
+};
+const saveTransactionsToFile = () => {
     fs.writeFileSync('usertransactions.json', JSON.stringify(transactions, null, 2));
-  };
+};
+
+// Generate OTP function
+const generateOTP = (email, isAdmin) => {
+    const otp = (Math.floor(100000 + Math.random() * 900000)).toString(); // 6-digit OTP
+    const expiry = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // Expires in 15 minutes
+  
+    if (isAdmin) {
+      const admin = admins.find((a) => a.email === email);
+      if (!admin) {
+        throw new Error('Admin email not found');
+      }
+      otpStore[otp] = { expiry, id: admin.id, type: 'admin' };
+    } else {
+      const user = users.find((u) => u.email === email);
+      if (!user) {
+        throw new Error('User email not found');
+      }
+      otpStore[otp] = { expiry, id: user.id, type: 'user' };
+    }
+  
+    setTimeout(() => delete otpStore[otp], 15 * 60 * 1000); // Automatically remove expired OTP
+    return { otp, expiry };
+};
 
 // Load users on start
 Object.assign(users, loadUsersFromFile());
@@ -250,6 +285,10 @@ const resolvers = {
             const payments = readPayments();
             return payments.find(payment => payment.id === id) || null;
         },
+        generateOTP: (_, { email }) => {
+            const isAdmin = admins.some((a) => a.email === email);
+            return generateOTP(email, isAdmin);
+        },
         getPaymentsByUser: (_, { userId }) => {
             const payments = readPayments();
             return payments.filter(payment => payment.userId === userId);
@@ -269,8 +308,8 @@ const resolvers = {
             });
       
             return { token, user: { ...user, password: null } }; // Omit password from response
-          },
-          adminLogin: (_, { email, password }) => {
+        },
+        adminLogin: (_, { email, password }) => {
             const admin = admins.find((admin) => admin.email === email);
             if (!admin) {
               throw new Error('Admin not found');
@@ -285,25 +324,25 @@ const resolvers = {
             });
       
             return { adminToken, admin };
-          },
-          getAllUsers: (_, { adminToken }) => {
+        },
+        getAllUsers: (_, { adminToken }) => {
             const admin = jwt.verify(adminToken, ADMIN_SECRET);
             if (!admin) {
               throw new Error('Invalid admin token');
             }
             return users.map((user) => ({ ...user, password: null }));
-          },
-          getDeletedUsers: (_, { adminToken }) => {
+        },
+        getDeletedUsers: (_, { adminToken }) => {
             const admin = jwt.verify(adminToken, ADMIN_SECRET);
             if (!admin) {
               throw new Error('Invalid admin token');
             }
             return deletedUsers;
-          },
-          getDeposits: (_, { userId }) => {
+        },
+        getDeposits: (_, { userId }) => {
             return deposits.filter((deposit) => deposit.userId === userId);
-          },
-          getWalletAddresses: (_, { userId, blockchain }) => {
+        },
+        getWalletAddresses: (_, { userId, blockchain }) => {
             const custodian = custodians.find((entry) => entry.userId === userId);
       
             if (!custodian) {
@@ -317,20 +356,20 @@ const resolvers = {
             } else {
               throw new Error('Unsupported blockchain');
             }
-          },
-          getUsers: () => {
+        },
+        getUsers: () => {
             const users = loadUsersFromFile();
             return users;
-          },
-          getUserById: (_, { userId }) => {
+        },
+        getUserById: (_, { userId }) => {
             const users = loadUsersFromFile();
             const user = users.find((user) => user.id === userId);
             if (!user) {
               throw new Error('User not found');
             }
             return user;
-          },
-          getBalance: (_, { token }) => {
+        },
+        getBalance: (_, { token }) => {
             const decoded = jwt.verify(token, JWT_SECRET);
             const user = users.find((u) => u.id === decoded.id);
       
@@ -343,9 +382,9 @@ const resolvers = {
             const balance = userTransactions.reduce((sum, t) => sum + (t.type === 'deposit' ? t.amount : -t.amount), 0);
       
             return balance;
-          },
+        },
       
-          getTransactions: (_, { token }) => {
+        getTransactions: (_, { token }) => {
             const decoded = jwt.verify(token, JWT_SECRET);
             const user = users.find((u) => u.id === decoded.id);
       
@@ -354,9 +393,9 @@ const resolvers = {
             }
       
             return transactions.filter((t) => t.userid === user.id);
-          },
+        },
       
-          getAllTransactions: (_, { adminToken }) => {
+        getAllTransactions: (_, { adminToken }) => {
             const decoded = jwt.verify(adminToken, ADMIN_SECRET);
             const admin = admins.find((a) => a.id === decoded.id);
       
@@ -365,7 +404,7 @@ const resolvers = {
             }
       
             return transactions;
-          },
+        },
     },
     Mutation: {
         generatePaymentAddress: async (_, { userId, amount, blockchain }) => {
@@ -556,6 +595,123 @@ const resolvers = {
             saveTransactionsToFile();
             return newTransaction;
           },
+          generateOTP: (_, { email }) => {
+            const isAdmin = admins.some((a) => a.email === email);
+            return generateOTP(email, isAdmin);
+          },
+        },
+      
+        Mutation: {
+          changeUserPassword: (_, { token, otp, oldPassword, newPassword }) => {
+            if (!token && !otp) {
+              throw new Error('Either token or OTP must be provided');
+            }
+      
+            let user;
+            if (token) {
+              const decoded = jwt.verify(token, JWT_SECRET);
+              user = users.find((u) => u.id === decoded.id);
+              if (!user) {
+                throw new Error('Invalid token or user not found');
+              }
+      
+              if (oldPassword && user.password !== oldPassword) {
+                throw new Error('Old password is incorrect');
+              }
+            }
+      
+            if (otp) {
+              const otpData = otpStore[otp];
+              if (!otpData || new Date() > new Date(otpData.expiry) || otpData.type !== 'user') {
+                throw new Error('Invalid or expired OTP');
+              }
+              user = users.find((u) => u.id === otpData.id);
+              if (!user) {
+                throw new Error('Invalid OTP or user not found');
+              }
+      
+              // Invalidate OTP after use
+              delete otpStore[otp];
+            }
+      
+            if (!user) {
+              throw new Error('Unable to locate user');
+            }
+      
+            user.password = newPassword;
+            saveUsersToFile();
+            return 'User password changed successfully';
+          },
+      
+          changeAdminPassword: (_, { adminToken, otp, oldPassword, newPassword }) => {
+            if (!adminToken && !otp) {
+              throw new Error('Either adminToken or OTP must be provided');
+            }
+      
+            let admin;
+            if (adminToken) {
+              const decoded = jwt.verify(adminToken, ADMIN_SECRET);
+              admin = admins.find((a) => a.id === decoded.id);
+              if (!admin) {
+                throw new Error('Invalid token or admin not found');
+              }
+      
+              if (oldPassword && admin.password !== oldPassword) {
+                throw new Error('Old password is incorrect');
+              }
+            }
+      
+            if (otp) {
+              const otpData = otpStore[otp];
+              if (!otpData || new Date() > new Date(otpData.expiry) || otpData.type !== 'admin') {
+                throw new Error('Invalid or expired OTP');
+              }
+              admin = admins.find((a) => a.id === otpData.id);
+              if (!admin) {
+                throw new Error('Invalid OTP or admin not found');
+              }
+      
+              // Invalidate OTP after use
+              delete otpStore[otp];
+            }
+      
+            if (!admin) {
+              throw new Error('Unable to locate admin');
+            }
+      
+            admin.password = newPassword;
+            saveAdminsToFile();
+            return 'Admin password changed successfully';
+          },
+      
+          changeUserEmail: (_, { token, otp, newEmail }) => {
+            if (!token || !otp) {
+              throw new Error('Both token and OTP must be provided');
+            }
+      
+            const decoded = jwt.verify(token, JWT_SECRET);
+            const user = users.find((u) => u.id === decoded.id);
+            if (!user) {
+              throw new Error('Invalid token or user not found');
+            }
+      
+            const otpData = otpStore[otp];
+            if (!otpData || new Date() > new Date(otpData.expiry) || otpData.type !== 'user' || otpData.id !== user.id) {
+              throw new Error('Invalid or expired OTP');
+            }
+      
+            if (!newEmail || !newEmail.includes('@')) {
+              throw new Error('A valid email address must be provided');
+            }
+      
+            user.email = newEmail;
+            saveUsersToFile();
+      
+            // Invalidate OTP after use
+            delete otpStore[otp];
+      
+            return 'User email changed successfully';
+          },         
     },
 };
 

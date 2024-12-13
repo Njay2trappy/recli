@@ -8,26 +8,30 @@ const typeDefs = gql`
     directive @example on FIELD_DEFINITION
     
     type Query {
-    getBalance(token: String!): Float!
-    getTransactions(token: String!): [Transaction!]!
-    getAllTransactions(adminToken: String!): [Transaction!]!
+    generateOTP(email: String!): OTPResponse!
   }
-
 
   type Mutation {
-    updateTransactionStatus(adminToken: String!, transactionId: ID!, status: String!): Transaction!
-    topUpAccount(adminToken: String!, username: String!, amount: Float!): Transaction!
+    changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
+    changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
+    changeUserEmail(token: String, otp: String, newEmail: String!): String!
   }
-    type Transaction {
+
+  type OTPResponse {
+    otp: String!
+    expiry: String!
+  }
+
+  type User {
     id: ID!
-    userid: ID!
-    walletAddress: String!
-    privateKey: String!
-    amount: Float!
-    convertedAmount: Float!
-    status: String! # "success", "pending", "failed"
-    createdAt: String!
-    blockchain: String!
+    username: String!
+    email: String!
+  }
+
+  type Admin {
+    id: ID!
+    username: String!
+    email: String!
   }
 `;
 

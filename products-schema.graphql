@@ -13,27 +13,31 @@ directive @tag(name: String!) repeatable on FIELD_DEFINITION | OBJECT | INTERFAC
 directive @extends on OBJECT | INTERFACE
 
 type Query {
-  getBalance(token: String!): Float!
-  getTransactions(token: String!): [Transaction!]!
-  getAllTransactions(adminToken: String!): [Transaction!]!
+  generateOTP(email: String!): OTPResponse!
   _service: _Service!
 }
 
 type Mutation {
-  updateTransactionStatus(adminToken: String!, transactionId: ID!, status: String!): Transaction!
-  topUpAccount(adminToken: String!, username: String!, amount: Float!): Transaction!
+  changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
+  changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
+  changeUserEmail(token: String, otp: String, newEmail: String!): String!
 }
 
-type Transaction {
+type OTPResponse {
+  otp: String!
+  expiry: String!
+}
+
+type User {
   id: ID!
-  userid: ID!
-  walletAddress: String!
-  privateKey: String!
-  amount: Float!
-  convertedAmount: Float!
-  status: String!
-  createdAt: String!
-  blockchain: String!
+  username: String!
+  email: String!
+}
+
+type Admin {
+  id: ID!
+  username: String!
+  email: String!
 }
 
 scalar _FieldSet
