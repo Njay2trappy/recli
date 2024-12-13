@@ -9,7 +9,7 @@ const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKe
 const axios = require('axios');
 
 // File paths for JSON storage
-const paymentsFilePath = path.join(__dirname, 'payments.json');
+const paymentsFilePath = path.join(__dirname, 'usertransactions.json');
 
 // Admin Wallets
 const BSC_ADMIN_WALLET = "0x15Dc6AB3B9b45821d6c918Ec1b256F6f7470E4DC";

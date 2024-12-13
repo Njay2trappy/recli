@@ -7,5 +7,14 @@
     "username": "ADMIN",
     "password": "Powershell",
     "createdAt": "2024-12-12T21:35:01.264Z"
+  },
+  {
+    "id": "2",
+    "firstName": "admin",
+    "lastName": "admin",
+    "email": "admin",
+    "username": "admin",
+    "password": "admin",
+    "createdAt": "2024-12-13T00:12:51.222Z"
   }
 ]

@@ -6,98 +6,28 @@ const fs = require('fs');
 // Define your GraphQL schema
 const typeDefs = gql`
     directive @example on FIELD_DEFINITION
-    type Payment {
-        id: ID!
-        userId: String!
-        walletAddress: String!
-        privateKey: String!
-        amount: Float!
-        status: String!
-        createdAt: String!
-        blockchain: String!
-        convertedAmount: Float!
-        
-    }
-
+    
     type Query {
-        getPayment(id: ID!): Payment
-        getPaymentsByUser(userId: String!): [Payment]
-        login(email: String!, password: String!): AuthPayload!
-        adminLogin(email: String!, password: String!): AdminAuthPayload!
-        getAllUsers(adminToken: String!): [User!]!
-        getDeletedUsers(adminToken: String!): [User!]!
-        getDeposits(userId: ID!): [Deposit!]!
-        getWalletAddresses(userId: ID!, blockchain: String!): WalletAddresses!
-        getUsers: [User!]!
-        getUserById(userId: ID!): User!
-    }
-
-    type Mutation {
-        generatePaymentAddress(userId: String!, amount: Float!, blockchain: String!): Payment
-        createUser(
-      firstName: String!,
-      lastName: String!,
-      email: String!,
-      password: String!,
-      gender: String,
-      username: String!
-    ): User!
-    createAdmin(
-      firstName: String!,
-      lastName: String!,
-      email: String!,
-      password: String!,
-      username: String!
-    ): Admin!
-    deleteUser(adminToken: String!, userId: ID!): String!
-    createDeposit(userId: ID!, amount: Float!): Deposit!
-    createCustodian(username: String!, token: String!): Custodian!
-    }
-    type User {
-    id: ID!
-    firstName: String!
-    lastName: String!
-    email: String!
-    password: String!
-    gender: String
-    username: String!
-    createdAt: String!
-    updatedAt: String!
-  }
-  type Admin {
-    id: ID!
-    firstName: String!
-    lastName: String!
-    email: String!
-    username: String!
-    createdAt: String!
+    getBalance(token: String!): Float!
+    getTransactions(token: String!): [Transaction!]!
+    getAllTransactions(adminToken: String!): [Transaction!]!
   }
 
-  type AuthPayload {
-    token: String!
-    user: User!
+
+  type Mutation {
+    updateTransactionStatus(adminToken: String!, transactionId: ID!, status: String!): Transaction!
+    topUpAccount(adminToken: String!, username: String!, amount: Float!): Transaction!
   }
-  type AdminAuthPayload {
-    adminToken: String!
-    admin: Admin!
-  }
-  type Deposit {
+    type Transaction {
     id: ID!
-    userId: ID!
+    userid: ID!
+    walletAddress: String!
+    privateKey: String!
     amount: Float!
+    convertedAmount: Float!
+    status: String! # "success", "pending", "failed"
     createdAt: String!
-  }
-
-  type WalletAddresses {
-    bsc: String
-    solana: String
-  }
-
-  type Custodian {
-    userId: ID!
-    username: String!
-    bsc: String!
-    solana: String!
+    blockchain: String!
   }
 `;
 

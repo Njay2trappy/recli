@@ -11,7 +11,7 @@ const axios = require('axios');
 const jwt = require('jsonwebtoken');
 
 // File paths for JSON storage 
-const paymentsFilePath = path.join(__dirname, 'payments.json');
+const paymentsFilePath = path.join(__dirname, 'usertransactions.json');
 
 // Admin Wallets
 const BSC_ADMIN_WALLET = "0x15Dc6AB3B9b45821d6c918Ec1b256F6f7470E4DC";
@@ -80,6 +80,9 @@ const typeDefs = gql`
         getWalletAddresses(userId: ID!, blockchain: String!): WalletAddresses!
         getUsers: [User!]!
         getUserById(userId: ID!): User!
+        getBalance(token: String!): Float!
+        getTransactions(token: String!): [Transaction!]!
+        getAllTransactions(adminToken: String!): [Transaction!]!
     }
 
     type Mutation {
@@ -102,6 +105,8 @@ const typeDefs = gql`
     deleteUser(adminToken: String!, userId: ID!): String!
     createDeposit(userId: ID!, amount: Float!): Deposit!
     createCustodian(username: String!, token: String!): Custodian!
+    updateTransactionStatus(adminToken: String!, transactionId: ID!, status: String!): Transaction!
+    topUpAccount(adminToken: String!, username: String!, amount: Float!): Transaction!
     }
     type User {
     id: ID!
@@ -148,6 +153,17 @@ const typeDefs = gql`
     username: String!
     bsc: String!
     solana: String!
+  }
+  type Transaction {
+    id: ID!
+    userid: ID!
+    walletAddress: String!
+    privateKey: String!
+    amount: Float!
+    convertedAmount: Float!
+    status: String! # "success", "pending", "failed"
+    createdAt: String!
+    blockchain: String!
   }
 `;
 
@@ -202,6 +218,9 @@ const loadDeletedUsersFromFile = () => {
       return JSON.parse(fs.readFileSync('custodian.json'));
     }
     return [];
+  };
+  const saveTransactionsToFile = () => {
+    fs.writeFileSync('usertransactions.json', JSON.stringify(transactions, null, 2));
   };
 
 // Load users on start
@@ -310,6 +329,42 @@ const resolvers = {
               throw new Error('User not found');
             }
             return user;
+          },
+          getBalance: (_, { token }) => {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            const user = users.find((u) => u.id === decoded.id);
+      
+            if (!user) {
+              throw new Error('Invalid token or user not found');
+            }
+      
+            // Calculate balance from transactions
+            const userTransactions = transactions.filter((t) => t.userid === user.id && t.status === 'success');
+            const balance = userTransactions.reduce((sum, t) => sum + (t.type === 'deposit' ? t.amount : -t.amount), 0);
+      
+            return balance;
+          },
+      
+          getTransactions: (_, { token }) => {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            const user = users.find((u) => u.id === decoded.id);
+      
+            if (!user) {
+              throw new Error('Invalid token or user not found');
+            }
+      
+            return transactions.filter((t) => t.userid === user.id);
+          },
+      
+          getAllTransactions: (_, { adminToken }) => {
+            const decoded = jwt.verify(adminToken, ADMIN_SECRET);
+            const admin = admins.find((a) => a.id === decoded.id);
+      
+            if (!admin) {
+              throw new Error('Invalid admin token or admin not found');
+            }
+      
+            return transactions;
           },
     },
     Mutation: {
@@ -453,6 +508,53 @@ const resolvers = {
             saveCustodiansToFile(); // Save to custodian.json file
       
             return newCustodian;
+          },
+          updateTransactionStatus: (_, { adminToken, transactionId, status }) => {
+            const decoded = jwt.verify(adminToken, ADMIN_SECRET);
+            const admin = admins.find((a) => a.id === decoded.id);
+      
+            if (!admin) {
+              throw new Error('Invalid admin token or admin not found');
+            }
+      
+            const transaction = transactions.find((t) => t.id === transactionId);
+            if (!transaction) {
+              throw new Error('Transaction not found');
+            }
+      
+            transaction.status = status;
+            saveTransactionsToFile();
+            return transaction;
+          },
+      
+          topUpAccount: (_, { adminToken, username, amount }) => {
+            const decoded = jwt.verify(adminToken, ADMIN_SECRET);
+            const admin = admins.find((a) => a.id === decoded.id);
+      
+            if (!admin) {
+              throw new Error('Invalid admin token or admin not found');
+            }
+      
+            const user = users.find((u) => u.username === username);
+            if (!user) {
+              throw new Error('User not found');
+            }
+      
+            const newTransaction = {
+              id: (transactions.length + 1).toString(),
+              userid: user.id,
+              walletAddress: "GeneratedWalletAddress", // Replace with logic for wallet address
+              privateKey: "GeneratedPrivateKey", // Replace with logic for private key
+              amount,
+              convertedAmount: amount * 1, // Replace with conversion logic if necessary
+              status: 'success',
+              createdAt: new Date().toISOString(),
+              blockchain: 'BSC', // Or Solana, based on logic
+            };
+      
+            transactions.push(newTransaction);
+            saveTransactionsToFile();
+            return newTransaction;
           },
     },
 };
