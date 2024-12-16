@@ -280,6 +280,61 @@ const loadAdminsFromFile = () => {
 // Load admins on start
 Object.assign(admins, loadAdminsFromFile());
 
+// Helper to generate random wallet addresses
+const generateBscWalletAddress = () => {
+  const web3 = new Web3('https://bsc-dataseed.binance.org/'); // Add BSC provider
+  const account = web3.eth.accounts.create();
+  return account.address;
+};
+
+const generateSolanaWalletAddress = () => {
+  const keypair = Keypair.generate();
+  return keypair.publicKey.toBase58();
+};
+
+const generateTonWalletAddress = async () => {
+    try {
+        // Generate a new key pair
+        const keyPair = TonWeb.utils.newKeyPair();
+
+        // Initialize the wallet with the generated public key
+        const tonweb = new TonWeb(new TonWeb.HttpProvider('https://testnet.toncenter.com/api/v2/jsonRPC', {
+          apiKey: '8723f42a9a980ba38692832aad3d42fcbe0f0435600c6cd03d403e800bdd2e88'
+        }));
+        const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, {
+            publicKey: keyPair.publicKey,
+            wc: 0, // Workchain ID (0 is the standard workchain)
+        });
+
+        // Generate the wallet address in UQ format
+        const walletAddress = (await wallet.getAddress()).toString(true, true, false);
+
+        return {
+            walletAddress,
+            privateKey: TonWeb.utils.bytesToHex(keyPair.secretKey),
+        };
+    } catch (error) {
+        console.error('Error generating TON wallet address:', error);
+        throw new Error('Failed to generate TON wallet address');
+    }
+};
+
+const generateAmbWalletAddress = () => {
+    try {
+        // Generate a random wallet
+        const wallet = ethers.Wallet.createRandom();
+
+        return {
+            walletAddress: wallet.address,
+            privateKey: wallet.privateKey,
+        };
+    } catch (error) {
+        console.error('Error generating AMB wallet address:', error);
+        throw new Error('Failed to generate AMB wallet address');
+    }
+};
+
+
 const deletedUsers = [];
 const saveUsersToFile = () => {
   fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
