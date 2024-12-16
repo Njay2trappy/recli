@@ -11,10 +11,12 @@ const typeDefs = gql`
     adminLogin(email: String!, password: String!): AdminAuthPayload!
     getAllUsers(adminToken: String): [User!]!
     getDeletedUsers(adminToken: String): [User!]!
-    getToken(username: String!): String!
+    getTokens(adminToken: String!): [String!]!
   }
-
-  type Mutation {
+  type TokenPayload {
+   token: String!
+ }
+ type Mutation {
     createUser(
       firstName: String!,
       lastName: String!,
@@ -73,8 +75,24 @@ const activeTokens = new Set();
 const tokensFile = 'tokens.json';
 
 const saveTokensToFile = () => {
-  fs.writeFileSync(tokensFile, JSON.stringify([...activeTokens], null, 2));
+  const userTokens = [...activeTokens].filter((token) => {
+    const decoded = jwt.decode(token);
+    return decoded && !decoded.admin; // Filter user tokens
+  });
+
+  const adminTokens = [...activeTokens].filter((token) => {
+    const decoded = jwt.decode(token);
+    return decoded && decoded.admin; // Filter admin tokens
+  });
+
+// Save user tokens
+  fs.writeFileSync(tokensFile, JSON.stringify(userTokens, null, 2));
+
+// Save admin tokens
+  fs.writeFileSync('adtokens.json', JSON.stringify(adminTokens, null, 2));
 };
+
+  
 
 const loadTokensFromFile = () => {
   if (fs.existsSync(tokensFile)) {
@@ -83,7 +101,17 @@ const loadTokensFromFile = () => {
   return new Set();
 };
 
+const loadAdminTokensFromFile = () => {
+  if (fs.existsSync('adtokens.json')) {
+    return new Set(JSON.parse(fs.readFileSync('adtokens.json')));
+  }
+  return new Set();
+};
+
+// On server start, load tokens
 activeTokens.add(...loadTokensFromFile());
+activeTokens.add(...loadAdminTokensFromFile());
+
 
 const revokeToken = (token) => {
   activeTokens.delete(token);
@@ -99,10 +127,18 @@ const validateToken = (token, secret) => {
   try {
     return jwt.verify(token, secret);
   } catch (err) {
-    revokeToken(token); // Remove expired token
-    throw new Error('Token is invalid or has expired');
+    if (err.name === 'TokenExpiredError') {
+      activeTokens.delete(token);
+      saveTokensToFile();
+      if (secret === ADMIN_SECRET) {
+        fs.writeFileSync('adtokens.json', JSON.stringify([...activeTokens], null, 2));
+      }
+      throw new Error('Token has expired');
+    }
+    throw new Error('Token is invalid');
   }
 };
+
 
 const saveAdminsToFile = () => {
   fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
@@ -160,9 +196,14 @@ const resolvers = {
       }
 
       const existingToken = [...activeTokens].find((token) => {
-        const decoded = jwt.decode(token);
-        return decoded?.email === email;
+        try {
+          const decoded = jwt.decode(token);
+          return decoded?.email === email;
+        } catch {
+          return false;
+        }
       });
+      
 
       if (existingToken) {
         throw new Error('User is already logged in');
@@ -182,27 +223,26 @@ const resolvers = {
       if (!admin) {
         throw new Error('Admin not found');
       }
-
+    
       if (admin.password !== password) {
         throw new Error('Invalid password');
       }
-
-      const existingToken = [...activeTokens].find((token) => {
-        const decoded = jwt.decode(token);
-        return decoded?.email === email;
-      });
-
-      if (existingToken) {
-        throw new Error('Admin is already logged in');
-      }
-
-      const adminToken = jwt.sign({ id: admin.id, email: admin.email }, ADMIN_SECRET, {
-        expiresIn: '1h',
-      });
-
+    
+      const adminToken = jwt.sign(
+        { id: admin.id, email: admin.email, admin: true }, // Add admin flag
+        ADMIN_SECRET,
+        { expiresIn: '1h' }
+      );
+    
       activeTokens.add(adminToken);
-      saveTokensToFile();
-
+    
+      // Save to adtokens.json
+      const adminTokens = [...activeTokens].filter((token) => {
+        const decoded = jwt.decode(token);
+        return decoded && decoded.admin;
+      });
+      fs.writeFileSync('adtokens.json', JSON.stringify(adminTokens, null, 2));
+    
       return { adminToken, admin };
     },
     getAllUsers: (_, { adminToken }, context) => {
@@ -210,31 +250,51 @@ const resolvers = {
       if (!token) {
         throw new Error('Admin token is required');
       }
-
-      const admin = validateToken(token, ADMIN_SECRET);
+    
+      // Load admin tokens from the database
+      const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
+    
+      // Check if the token is valid
+      if (!adminTokens.has(token)) {
+        throw new Error('Invalid or expired admin token');
+      }
+    
+      const admin = validateToken(token, ADMIN_SECRET); // Validate the admin token
       return users.map((user) => ({ ...user, password: null }));
     },
+    
     getDeletedUsers: (_, { adminToken }, context) => {
       const token = adminToken || context.token;
       if (!token) {
         throw new Error('Admin token is required');
       }
-
-      const admin = validateToken(token, ADMIN_SECRET);
+    
+      // Load admin tokens from the database
+      const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
+    
+      // Check if the token is valid
+      if (!adminTokens.has(token)) {
+        throw new Error('Invalid or expired admin token');
+      }
+    
+      const admin = validateToken(token, ADMIN_SECRET); // Validate the admin token
       return deletedUsers;
     },
-    getToken: (_, { username }) => {
-      const token = [...activeTokens].find((t) => {
-        const decoded = jwt.decode(t);
-        return decoded?.username === username;
-      });
-
-      if (!token) {
-        throw new Error('No active token found for this username');
+    getTokens: (_, { adminToken }) => {
+      // Validate the admin token
+      validateToken(adminToken, ADMIN_SECRET);
+    
+      // Load all user tokens from tokens.json
+      const userTokens = JSON.parse(fs.readFileSync('tokens.json'));
+    
+      if (!Array.isArray(userTokens)) {
+        throw new Error('Invalid token storage format');
       }
-
-      return token;
+    
+      // Return the list of user tokens
+      return userTokens;
     },
+    
   },
   Mutation: {
     createUser: (_, { firstName, lastName, email, password, gender, username }) => {
@@ -243,8 +303,7 @@ const resolvers = {
       }
 
       const newUser = {
-        id: (users.length + 1).toString(), // Ensure id is a string
-        firstName,
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,        firstName,
         lastName,
         email,
         password,
@@ -264,8 +323,7 @@ const resolvers = {
       }
 
       const newAdmin = {
-        id: (admins.length + 1).toString(),
-        firstName,
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,        firstName,
         lastName,
         email,
         username,
@@ -302,13 +360,28 @@ const resolvers = {
       return `User with ID ${userId} has been deleted.`;
     },
     logout: (_, { token }) => {
-      if (!activeTokens.has(token)) {
-        throw new Error('Invalid or expired token');
-      }
-
-      revokeToken(token);
-      return 'Successfully logged out';
-    },
+        // Load tokens from the appropriate file
+        const userTokens = new Set(JSON.parse(fs.readFileSync('tokens.json')));
+        const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
+      
+        // Check if the token is valid in either users or admins
+        if (!userTokens.has(token) && !adminTokens.has(token)) {
+          throw new Error('Invalid or expired token');
+        }
+      
+        // Remove the token from the respective set
+        if (userTokens.has(token)) {
+          userTokens.delete(token);
+          fs.writeFileSync('tokens.json', JSON.stringify([...userTokens], null, 2));
+        } else if (adminTokens.has(token)) {
+          adminTokens.delete(token);
+          fs.writeFileSync('adtokens.json', JSON.stringify([...adminTokens], null, 2));
+        }
+      
+        return 'Successfully logged out';
+      },
+      
+    
   },
 };
 
@@ -325,7 +398,7 @@ const server = new ApolloServer({
 
 (async () => {
   const { url } = await startStandaloneServer(server, {
-    listen: { port: process.env.PORT || 4001 }, // Use the platform's assigned port or default to 4001
+    listen: { port: process.env.PORT || 4002 }, // Use the platform's assigned port or default to 4001
   });
 
   console.log(`\uD83D\uDE80 Server ready at ${url}`);

@@ -93,5 +93,48 @@
     "username": "hdhhh",
     "createdAt": "2024-12-12T18:16:58.944Z",
     "updatedAt": "2024-12-12T18:16:58.944Z"
+  },
+  {
+    "id": "10",
+    "firstName": "user",
+    "lastName": "user",
+    "email": "user",
+    "password": "user",
+    "username": "user",
+    "createdAt": "2024-12-14T13:29:10.911Z",
+    "updatedAt": "2024-12-14T13:29:10.911Z"
+  },
+  {
+    "id": "11",
+    "firstName": "star",
+    "lastName": "star",
+    "email": "star",
+    "password": "star",
+    "gender": "male",
+    "username": "star",
+    "createdAt": "2024-12-15T18:34:26.176Z",
+    "updatedAt": "2024-12-15T18:34:26.176Z"
+  },
+  {
+    "id": "12",
+    "firstName": "star",
+    "lastName": "star",
+    "email": "star1",
+    "password": "star1",
+    "gender": "male",
+    "username": "star",
+    "createdAt": "2024-12-15T18:55:17.785Z",
+    "updatedAt": "2024-12-15T18:55:17.785Z"
+  },
+  {
+    "id": "13",
+    "firstName": "star",
+    "lastName": "star",
+    "email": "star12",
+    "password": "star",
+    "gender": "male",
+    "username": "star",
+    "createdAt": "2024-12-15T18:57:01.361Z",
+    "updatedAt": "2024-12-15T18:57:01.361Z"
   }
 ]

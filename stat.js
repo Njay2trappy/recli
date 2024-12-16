@@ -8,12 +8,109 @@ const typeDefs = gql`
     directive @example on FIELD_DEFINITION
     
     type Query {
-      getToken(username: String!): String!
-  }
+        login(email: String!, password: String!): AuthPayload!
+        adminLogin(email: String!, password: String!): AdminAuthPayload!
+        getAllUsers(adminToken: String): [User!]!
+        getDeletedUsers(adminToken: String): [User!]!
+        getTokens(adminToken: String!): [String!]!
+        getWalletAddresses(token: String!): CustodianOrMessage!
+        getUsers(adminToken: String!): UsersOrMessage!
+        queryAPIKey(token: String!): APIKey!
+        getPayment(adminToken: String!): [Payment]
+        getPaymentsByUser(userToken: String, apiKey: String): [Payment]
+    }
+    type TokenPayload {
+        token: String!
+    }
+    type Mutation {
+        createUser(
+        firstName: String!,
+        lastName: String!,
+        email: String!,
+        password: String!,
+        gender: String,
+        username: String!
+        ): User!
+        createAdmin(
+        firstName: String!,
+        lastName: String!,
+        email: String!,
+        password: String!,
+        username: String!
+        ): Admin! 
+        deleteUser(adminToken: String, userId: ID!): String!
+        logout(token: String!): String!
+        createCustodian(token: String!): CustodianOrMessage!
+        adminSignOut(adminToken: String!): Message!
+        generateAPIKey(token: String!): APIKey!
+        revokeAPIKey(token: String!): APIKey!
+        createSuperKey(adminToken: String!): APIKey!
+        generatePaymentAddress(
+        apiKey: String!
+        amount: Float!
+        blockchain: String!
+        recipientAddress: String!
+    ): Payment
+    }
+    type APIKey {
+        key: String!
+    }
+    type User {
+        id: ID!
+        firstName: String!
+        lastName: String!
+        email: String!
+        password: String!
+        gender: String
+        username: String!
+        createdAt: String!
+        updatedAt: String!
+    }
 
-  type Mutation {
-    logout(token: String!): String!
-  }
+    type Admin {
+        id: ID!
+        firstName: String!
+        lastName: String!
+        email: String!
+        username: String!
+        createdAt: String!
+    }
+
+    type AuthPayload {
+        token: String!
+        user: User!
+    }
+    type AdminAuthPayload {
+        adminToken: String!
+        admin: Admin!
+    }
+    type Message {
+            message: String!
+        }
+        type CustodianOrMessage {
+        message: String
+        userId: ID
+        email: String
+        bsc: String
+        solana: String
+        ton: String
+        amb: String
+    }
+    type UsersOrMessage {
+        message: String
+        users: [User!]
+    }
+    type Payment {
+    id: ID!
+    walletAddress: String!
+    privateKey: String!
+    recipientAddress: String!
+    amount: Float!
+    status: String!
+    createdAt: String!
+    blockchain: String!
+    convertedAmount: Float!
+    }
 `;
 
 // Define resolvers (optional for schema generation)

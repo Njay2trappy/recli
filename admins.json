@@ -16,5 +16,14 @@
     "username": "admin",
     "password": "admin",
     "createdAt": "2024-12-13T00:12:51.222Z"
+  },
+  {
+    "id": "3",
+    "firstName": "admin",
+    "lastName": "admin",
+    "email": "admin1",
+    "username": "admin",
+    "password": "admin",
+    "createdAt": "2024-12-15T19:09:03.654Z"
   }
 ]

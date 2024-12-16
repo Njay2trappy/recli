@@ -1,0 +1,105 @@
+{
+  "data": {
+    "getUsers": [
+      {
+        "id": "1",
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "john.doe@example.com",
+        "password": "password123",
+        "gender": "Male",
+        "username": "johndoe",
+        "createdAt": "2024-12-12T16:44:35.458Z",
+        "updatedAt": "2024-12-12T16:44:35.458Z"
+      },
+      {
+        "id": "2",
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "zebiulun@gmail.com",
+        "password": "password123",
+        "gender": "Male",
+        "username": "kii",
+        "createdAt": "2024-12-12T16:46:51.929Z",
+        "updatedAt": "2024-12-12T16:46:51.929Z"
+      },
+      {
+        "id": "3",
+        "firstName": "John",
+        "lastName": "Doe",
+        "email": "john.doe@exuiample.com",
+        "password": "password123",
+        "gender": "Male",
+        "username": "kuuii",
+        "createdAt": "2024-12-12T16:47:32.291Z",
+        "updatedAt": "2024-12-12T16:47:32.291Z"
+      },
+      {
+        "id": "4",
+        "firstName": "ikechukwu",
+        "lastName": "ngoesina",
+        "email": "ikechukwungoesina@gmail.com",
+        "password": "Password2.",
+        "gender": "male",
+        "username": "username",
+        "createdAt": "2024-12-12T17:00:06.065Z",
+        "updatedAt": "2024-12-12T17:00:06.065Z"
+      },
+      {
+        "id": "5",
+        "firstName": "ikechukwu",
+        "lastName": "ngoesina",
+        "email": "ikechukwungtoesina@gmail.com",
+        "password": "Password2.",
+        "gender": "male",
+        "username": "username23",
+        "createdAt": "2024-12-12T17:00:29.781Z",
+        "updatedAt": "2024-12-12T17:00:29.781Z"
+      },
+      {
+        "id": "6",
+        "firstName": "ike",
+        "lastName": "okec",
+        "email": "ik@gmail.com",
+        "password": "tester123",
+        "gender": null,
+        "username": "killerbean",
+        "createdAt": "2024-12-12T18:10:13.919Z",
+        "updatedAt": "2024-12-12T18:10:13.919Z"
+      },
+      {
+        "id": "7",
+        "firstName": "ike",
+        "lastName": "okec",
+        "email": "ik@gmkail.com",
+        "password": "tester123",
+        "gender": null,
+        "username": "starts",
+        "createdAt": "2024-12-12T18:11:37.444Z",
+        "updatedAt": "2024-12-12T18:11:37.444Z"
+      },
+      {
+        "id": "8",
+        "firstName": "null",
+        "lastName": "null",
+        "email": "null",
+        "password": "null",
+        "gender": null,
+        "username": "null",
+        "createdAt": "2024-12-12T18:16:34.137Z",
+        "updatedAt": "2024-12-12T18:16:34.137Z"
+      },
+      {
+        "id": "9",
+        "firstName": "hdhdh",
+        "lastName": "dhdhhd",
+        "email": "dhhdhd",
+        "password": "secondpassword",
+        "gender": null,
+        "username": "hdhhh",
+        "createdAt": "2024-12-12T18:16:58.944Z",
+        "updatedAt": "2024-12-12T18:16:58.944Z"
+      }
+    ]
+  }
+}

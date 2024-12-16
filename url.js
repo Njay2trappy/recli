@@ -7,6 +7,8 @@ const { v4: uuidv4 } = require('uuid');
 const Web3 = require('web3');
 const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKey } = require('@solana/web3.js');
 const axios = require('axios');
+const TonWeb = require('tonweb');
+const { ethers } = require('ethers');
 
 // File paths for JSON storage
 const paymentsFilePath = path.join(__dirname, 'payments.json');
@@ -15,6 +17,11 @@ const paymentsFilePath = path.join(__dirname, 'payments.json');
 const BSC_ADMIN_WALLET = "0x15Dc6AB3B9b45821d6c918Ec1b256F6f7470E4DC";
 const SOLANA_ADMIN_WALLET = "B6ze7uHAdKeXucs3uguYKbcGeeiz3pzizdLbz3rPembe";
 const BSC_TESTNET_RPC = "https://data-seed-prebsc-1-s1.binance.org:8545";
+
+// TON testnet configuration
+const tonweb = new TonWeb(new TonWeb.HttpProvider('https://testnet.toncenter.com/api/v2/jsonRPC', {
+    apiKey: '8723f42a9a980ba38692832aad3d42fcbe0f0435600c6cd03d403e800bdd2e88',
+}));
 
 // Initialize Web3 for BSC
 const web3 = new Web3(BSC_TESTNET_RPC);
@@ -41,32 +48,69 @@ const saveToFile = (filename, data) => {
 
 const apikeysFilePath = path.join(__dirname, 'apikeys.json');
 
-
-// Fetch live price for BNB or SOL in USD
 const fetchLivePrice = async (blockchain) => {
     try {
-        if (blockchain === 'BSC') {
-            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=binancecoin&vs_currencies=usd');
+        if (blockchain === 'AMB') {
+            // Fetch AirDAO (AMB) price using CryptoRank API
+            const response = await axios.get('https://api.cryptorank.io/v0/coins/prices', {
+                params: {
+                    keys: 'airdao', // Coin key for AirDAO (AMB)
+                    currency: 'USD' // Fetch price in USD
+                }
+            });
+
+            // Extract price from the response
+            const ambData = response.data.data.find(item => item.key === 'airdao');
+            if (ambData && ambData.price) {
+                return ambData.price; // Return the current price in USD
+            } else {
+                throw new Error('AMB price data is missing from the API response.');
+            }
+        } else if (blockchain === 'BSC') {
+            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+                params: { ids: 'binancecoin', vs_currencies: 'usd' }
+            });
             return response.data.binancecoin.usd;
         } else if (blockchain === 'Solana') {
-            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd');
+            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+                params: { ids: 'solana', vs_currencies: 'usd' }
+            });
             return response.data.solana.usd;
+        } else if (blockchain === 'TON') {
+            const response = await axios.get('https://api.coingecko.com/api/v3/simple/price', {
+                params: { ids: 'the-open-network', vs_currencies: 'usd' }
+            });
+            return response.data['the-open-network'].usd;
         }
         throw new Error('Unsupported blockchain');
     } catch (error) {
-        console.error('Error fetching live price:', error);
+        console.error(`Error fetching live price for ${blockchain}:`, error.message);
         throw new Error('Failed to fetch live price');
     }
 };
 
-// Validate recipient wallet address
 const validateWalletAddress = (address, blockchain) => {
     if (blockchain === 'BSC') {
-        return web3.utils.isAddress(address);
+        return web3.utils.isAddress(address); // BSC validation using Web3.js
     } else if (blockchain === 'Solana') {
         try {
-            new PublicKey(address); // This will throw an error if invalid
+            new PublicKey(address); // Throws an error if the address is invalid
             return true;
+        } catch (error) {
+            return false;
+        }
+    } else if (blockchain === 'TON') {
+        try {
+            // Validate TON wallet address in UQ format
+            const tonUQRegex = /^[UQ][A-Za-z0-9_-]{47}$/; // Example regex for UQ address format
+            return tonUQRegex.test(address);
+        } catch (error) {
+            return false;
+        }
+    } else if (blockchain === 'AMB') {
+        try {
+            // Validate AMB wallet address
+            return ethers.isAddress(address); // AMB validation using Ethers.js
         } catch (error) {
             return false;
         }
@@ -172,43 +216,79 @@ const resolvers = {
             // Load API keys dynamically
             const apiKeys = loadFromFile(path.join(__dirname, 'apikeys.json'));
         
-            // Validate the provided API key and get user details
+            // Validate the provided API key
             const apiKeyEntry = apiKeys.find((key) => key.apiKey === apiKey);
             if (!apiKeyEntry) {
                 throw new Error('Invalid or unauthorized API Key');
             }
         
-            const userEmail = apiKeyEntry.userData?.email; // Extract email from userData
+            // Extract email from user data
+            const userEmail = apiKeyEntry.userData?.email;
             if (!userEmail) {
                 throw new Error('Email not found for the provided API Key');
             }
         
+            // Validate deposit amount
             if (amount <= 0) {
                 throw new Error('Amount must be greater than 0');
             }
         
-            // Generate wallet address
-            let walletAddress, privateKey;
-            if (blockchain === 'BSC') {
+            // Validate recipient wallet address
+            if (!validateWalletAddress(recipientAddress, blockchain)) {
+                throw new Error(`Invalid recipient address for blockchain: ${blockchain}`);
+            }
+        
+            let walletAddress, privateKey, convertedAmount;
+        
+            if (blockchain === 'AMB') {
+                // Generate AMB wallet
+                const wallet = ethers.Wallet.createRandom();
+                walletAddress = wallet.address;
+                privateKey = wallet.privateKey;
+        
+                // Fetch live price for AMB and calculate converted amount
+                const livePrice = await fetchLivePrice(blockchain);
+                convertedAmount = amount / livePrice;
+        
+            } else if (blockchain === 'BSC') {
+                // Generate BSC wallet
                 const account = web3.eth.accounts.create();
                 walletAddress = account.address;
                 privateKey = account.privateKey;
+        
+                // Fetch live price for BSC and calculate converted amount
+                const livePrice = await fetchLivePrice(blockchain);
+                convertedAmount = amount / livePrice;
+        
             } else if (blockchain === 'Solana') {
+                // Generate Solana wallet
                 const keypair = Keypair.generate();
                 walletAddress = keypair.publicKey.toBase58();
                 privateKey = Buffer.from(keypair.secretKey).toString('hex');
+        
+                // Fetch live price for Solana and calculate converted amount
+                const livePrice = await fetchLivePrice(blockchain);
+                convertedAmount = amount / livePrice;
+        
+            } else if (blockchain === 'TON') {
+                // Generate TON wallet
+                const keyPair = TonWeb.utils.newKeyPair();
+                const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, { publicKey: keyPair.publicKey, wc: 0 });
+                walletAddress = (await wallet.getAddress()).toString(true, true, false); // UQ format
+                privateKey = TonWeb.utils.bytesToHex(keyPair.secretKey);
+        
+                // Fetch live price for TON and calculate converted amount
+                const livePrice = await fetchLivePrice(blockchain);
+                convertedAmount = amount / livePrice;
+        
             } else {
                 throw new Error('Unsupported blockchain');
             }
         
-            // Fetch live conversion rate and calculate converted amount
-            const livePrice = await fetchLivePrice(blockchain);
-            const convertedAmount = amount / livePrice;
-        
-            // Create a new payment object with email included
+            // Create a new payment record
             const newPayment = {
                 id: createPaymentId(),
-                email: userEmail,          // Add the extracted email to the payment object
+                email: userEmail,
                 walletAddress,
                 privateKey,
                 recipientAddress,
@@ -219,7 +299,7 @@ const resolvers = {
                 blockchain,
             };
         
-            // Save the payment in payments.json
+            // Save the payment record in payments.json
             const payments = loadFromFile(paymentsFilePath);
             payments.push(newPayment);
             saveToFile(paymentsFilePath, payments);
@@ -228,7 +308,8 @@ const resolvers = {
             monitorPayment(newPayment);
         
             return newPayment;
-        },   
+        },        
+         
     },
 };
 
@@ -262,11 +343,29 @@ const monitorPayment = async (payment) => {
                     updatePaymentStatus(payment.id, 'Completed');
                     console.log(`Payment completed for Solana wallet ${walletAddress}`);
                 }
+            } else if (blockchain === 'TON') {
+                const balance = await tonweb.provider.getBalance(walletAddress);
+                if (balance >= convertedAmount * 1e9) { // Converted amount to nanotons
+                    clearInterval(interval);
+                    await transferTONFunds(walletAddress, privateKey, recipientAddress, balance);
+                    updatePaymentStatus(payment.id, 'Completed');
+                    console.log(`Payment completed for TON wallet ${walletAddress}`);
+                }
+            } else if (blockchain === 'AMB') {
+                const balance = await provider.getBalance(walletAddress);
+                const balanceInEther = parseFloat(ethers.formatEther(balance));
+                if (balanceInEther >= convertedAmount) {
+                    clearInterval(interval);
+                    await transferAMBFunds(balanceInEther, privateKey, recipientAddress); 
+                    updatePaymentStatus(payment.id, 'Completed');
+                    console.log(`Payment completed for AMB wallet ${walletAddress}`);
+                }
             }
+            
         } catch (error) {
-            console.error(`Error monitoring payment for wallet ${walletAddress}:`, error);
+            console.error(`Error monitoring payment for wallet ${walletAddress}:`, error.message);
             clearInterval(interval); // Ensure interval is cleared on error
-                    }
+        }
     }, 2000); // Check every 2 seconds
 };
 
@@ -322,6 +421,53 @@ const transferSolanaFunds = async (walletAddress, privateKey, recipientAddress, 
         console.log(`Transferred Solana funds to recipient. Transaction Signature: ${signature}`);
     } catch (error) {
         console.error(`Error transferring Solana funds to recipient:`, error);
+    }
+};
+const transferTONFunds = async (walletAddress, privateKey, recipientAddress, nanotons) => {
+    try {
+        const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, {
+            publicKey: TonWeb.utils.publicKeyFromHex(privateKey),
+            wc: 0,
+        });
+
+        const seqno = 0; // Adjust as needed
+        await wallet.methods.transfer({
+            secretKey: TonWeb.utils.bytesFromHex(privateKey),
+            toAddress: recipientAddress,
+            amount: nanotons, // Amount in nanotons
+            seqno,
+            sendMode: 3,
+        }).send();
+        console.log(`Transferred TON funds to recipient address: ${recipientAddress}`);
+    } catch (error) {
+        console.error(`Error transferring TON funds:`, error.message);
+    }
+};
+
+const transferAMBFunds = async (amount, privateKey, recipientAddress) => {
+    try {
+        // Initialize the wallet using the private key
+        const wallet = new ethers.Wallet(privateKey, provider);
+
+        // Fetch gas price details
+        const feeData = await provider.getFeeData();
+        const gasPrice = feeData.gasPrice;
+
+        // Prepare the transaction
+        const tx = {
+            to: recipientAddress, // Transfer to recipientAddress
+            value: ethers.parseUnits(amount.toString(), 'ether'), // Convert amount to Wei
+            gasLimit: 21000,
+            gasPrice,
+        };
+
+        // Send the transaction
+        const txResponse = await wallet.sendTransaction(tx);
+        await txResponse.wait();
+
+        console.log(`✅ AMB funds transferred to recipient. Transaction Hash: ${txResponse.hash}`);
+    } catch (error) {
+        console.error('Error transferring AMB funds to recipient:', error.message);
     }
 };
 
