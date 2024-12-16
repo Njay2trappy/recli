@@ -27,7 +27,10 @@ const tonweb = new TonWeb(new TonWeb.HttpProvider('https://testnet.toncenter.com
 const web3 = new Web3(BSC_TESTNET_RPC);
 
 // Initialize Solana Connection
-const solanaConnection = new Connection(clusterApiUrl('devnet'));
+const solanaConnection = new Connection('https://api.devnet.solana.com');
+
+const AMB_RPC_URL = "https://network.ambrosus-test.io"; // Replace with your RPC URL if needed
+const provider = new ethers.JsonRpcProvider(AMB_RPC_URL);
 
 const loadFromFile = (filename) => {
     if (!fs.existsSync(filename)) {
@@ -425,19 +428,26 @@ const transferSolanaFunds = async (walletAddress, privateKey, recipientAddress, 
 };
 const transferTONFunds = async (walletAddress, privateKey, recipientAddress, nanotons) => {
     try {
+        const keyPair = TonWeb.utils.keyPairFromSecretKey(TonWeb.utils.hexToBytes(privateKey)); // Generate key pair
+
         const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, {
-            publicKey: TonWeb.utils.publicKeyFromHex(privateKey),
-            wc: 0,
+            publicKey: keyPair.publicKey,
+            wc: 0, // Workchain ID (0 is the standard workchain)
         });
 
-        const seqno = 0; // Adjust as needed
-        await wallet.methods.transfer({
-            secretKey: TonWeb.utils.bytesFromHex(privateKey),
-            toAddress: recipientAddress,
-            amount: nanotons, // Amount in nanotons
-            seqno,
-            sendMode: 3,
-        }).send();
+        // Set seqno explicitly to 0 for testing or for new wallets
+        const seqno = 0;
+
+        await wallet.methods
+            .transfer({
+                secretKey: keyPair.secretKey,
+                toAddress: recipientAddress,
+                amount: nanotons, // Amount in nanotons
+                seqno: seqno,
+                sendMode: 3,
+            })
+            .send();
+
         console.log(`Transferred TON funds to recipient address: ${recipientAddress}`);
     } catch (error) {
         console.error(`Error transferring TON funds:`, error.message);

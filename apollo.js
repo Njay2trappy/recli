@@ -1,9 +1,12 @@
 const { ApolloServer } = require('@apollo/server');
 const { startStandaloneServer } = require('@apollo/server/standalone');
 const { gql } = require('graphql-tag');
+const axios = require('axios');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 const fs = require('fs');
 const Web3 = require('web3');
-const { Keypair } = require('@solana/web3.js');
+const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKey } = require('@solana/web3.js');
 const TonWeb = require('tonweb');
 const { ethers } = require('ethers');
 const jwt = require('jsonwebtoken');
@@ -227,16 +230,19 @@ const revokeToken = (token) => {
 };
 
 const BSC_TESTNET_RPC = "https://data-seed-prebsc-1-s1.binance.org:8545";
+const web3 = new Web3(BSC_TESTNET_RPC);
 
 // TON testnet configuration
 const tonweb = new TonWeb(new TonWeb.HttpProvider('https://testnet.toncenter.com/api/v2/jsonRPC', {
     apiKey: '8723f42a9a980ba38692832aad3d42fcbe0f0435600c6cd03d403e800bdd2e88',
 }));
 
-const web3 = new Web3(BSC_TESTNET_RPC);
-
 // Initialize Solana Connection
-const solanaConnection = new Connection(clusterApiUrl('devnet'));
+const solanaConnection = new Connection('https://api.devnet.solana.com');
+
+//AMB connection
+const AMB_RPC_URL = "https://network.ambrosus-test.io"; // Replace with your RPC URL if needed
+const provider = new ethers.JsonRpcProvider(AMB_RPC_URL);
 
 // Helper function to validate token
 const validateToken = (token, secret) => {
@@ -352,7 +358,7 @@ const validateWalletAddress = (address, blockchain) => {
     } else if (blockchain === 'TON') {
         try {
             // Validate TON wallet address in UQ format
-            const tonUQRegex = /^[UQ][A-Za-z0-9_-]{47}$/; // Example regex for UQ address format
+            const tonUQRegex = /^[0Q][A-Za-z0-9_-]{47}$/; // Example regex for UQ address format
             return tonUQRegex.test(address);
         } catch (error) {
             return false;
@@ -556,7 +562,7 @@ const resolvers = {
 
             return { key: userKey.apiKey };
         },
-        etPayment: (_, { adminToken, superKey }) => {
+        getPayment: (_, { adminToken, superKey }) => {
             // Load payments dynamically
             const payments = loadFromFile(paymentsFilePath);
         
@@ -1045,25 +1051,46 @@ const transferSolanaFunds = async (walletAddress, privateKey, recipientAddress, 
     }
 };
 const transferTONFunds = async (walletAddress, privateKey, recipientAddress, nanotons) => {
-    try {
-        const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, {
-            publicKey: TonWeb.utils.publicKeyFromHex(privateKey),
-            wc: 0,
-        });
+  try {
+    // Deduct a fee (e.g., 0.01 TON for transaction cost)
+    const fee = 10_000_000; // 0.01 TON in nanotons
+    const amountToSend = nanotons - fee;
 
-        const seqno = 0; // Adjust as needed
-        await wallet.methods.transfer({
-            secretKey: TonWeb.utils.bytesFromHex(privateKey),
-            toAddress: recipientAddress,
-            amount: nanotons, // Amount in nanotons
-            seqno,
-            sendMode: 3,
-        }).send();
-        console.log(`Transferred TON funds to recipient address: ${recipientAddress}`);
-    } catch (error) {
-        console.error(`Error transferring TON funds:`, error.message);
+    if (amountToSend <= 0) {
+      console.log('Insufficient funds after deducting transaction fee.');
+      return;
     }
+
+    // Reuse the previously generated public key and private key
+    const secretKeyBytes = TonWeb.utils.hexToBytes(privateKey); // Convert private key from hex to bytes
+    const publicKeyBytes = secretKeyBytes.slice(32); // Extract public key from the last 32 bytes of the private key
+
+    // Initialize the wallet using the saved public key
+    const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, {
+      publicKey: publicKeyBytes, // Use the public key bytes
+      wc: 0, // Workchain ID (0 is the standard workchain)
+    });
+
+    // Set seqno explicitly to 0 for the first transaction
+    const seqno = 0;
+
+    // Transfer funds to the recipient address
+    await wallet.methods
+      .transfer({
+        secretKey: secretKeyBytes, // Use the private key bytes
+        toAddress: recipientAddress,
+        amount: amountToSend, // Amount after deducting fee
+        seqno: seqno, // Explicitly set to 0
+        sendMode: 3,
+      })
+      .send();
+
+    console.log(`Transferred ${amountToSend / 1e9} TON to recipient address: ${recipientAddress}`);
+  } catch (error) {
+      console.error('Error transferring TON funds:', error.message || error);
+  }
 };
+
 
 const transferAMBFunds = async (amount, privateKey, recipientAddress) => {
     try {
