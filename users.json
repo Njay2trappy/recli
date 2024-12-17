@@ -119,8 +119,8 @@
     "id": "12",
     "firstName": "star",
     "lastName": "star",
-    "email": "star1",
-    "password": "star1",
+    "email": "user@email.com",
+    "password": "password2",
     "gender": "male",
     "username": "star",
     "createdAt": "2024-12-15T18:55:17.785Z",
@@ -136,5 +136,48 @@
     "username": "star",
     "createdAt": "2024-12-15T18:57:01.361Z",
     "updatedAt": "2024-12-15T18:57:01.361Z"
+  },
+  {
+    "id": "1734386494488-jtheacshy",
+    "firstName": "joker",
+    "lastName": "joker",
+    "email": "joker",
+    "password": "joker",
+    "gender": "male",
+    "username": "joker",
+    "createdAt": "2024-12-16T22:01:34.488Z",
+    "updatedAt": "2024-12-16T22:01:34.488Z"
+  },
+  {
+    "id": "1734386577120-iozo9ozf9",
+    "firstName": "joker",
+    "lastName": "joker1",
+    "email": "joker1",
+    "password": "joker",
+    "gender": "male",
+    "username": "joker",
+    "createdAt": "2024-12-16T22:02:57.120Z",
+    "updatedAt": "2024-12-16T22:02:57.120Z"
+  },
+  {
+    "id": "MGVmNjA0ZWU1MTdkNTU0YmRmYmExYzI1Nzk3NGJhN2Q=:User",
+    "firstName": "joker",
+    "lastName": "joker12",
+    "email": "joker12",
+    "password": "joker",
+    "gender": "male",
+    "username": "joker",
+    "createdAt": "2024-12-16T22:07:59.529Z",
+    "updatedAt": "2024-12-16T22:07:59.529Z"
+  },
+  {
+    "id": "NmZiNmJmOWI0OGFmZWU4ZDAxZWMxNjg0ZmNkYTU4NmQ=",
+    "firstName": "Akara",
+    "lastName": "akara",
+    "email": "akara",
+    "password": "akara",
+    "username": "akara",
+    "createdAt": "2024-12-17T00:54:43.091Z",
+    "updatedAt": "2024-12-17T00:54:43.091Z"
   }
 ]

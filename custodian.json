@@ -34,5 +34,14 @@
     "solana": "5dqND4777dr8J8WLa5gdc7EbPX1v9pboMiAXHgxn1ULo",
     "ton": "UQCarA33Jy4A3Bp0PGVuZmqRYiYrTTIG4Xw8TU69hexjx8CT",
     "amb": "0xE38D8aed895122e2d9b61dE339a77a236Ef4d328"
+  },
+  {
+    "userId": "NmZiNmJmOWI0OGFmZWU4ZDAxZWMxNjg0ZmNkYTU4NmQ=",
+    "email": "akara",
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6Ik5tWmlObUptT1dJME9HRm1aV1U0WkRBeFpXTXhOamcwWm1Oa1lUVTRObVE9IiwiZW1haWwiOiJha2FyYSIsImlhdCI6MTczNDM5NjkzMSwiZXhwIjoxNzM0NDAwNTMxfQ.4CxGcPWsiTGqwbdb0irAya5Mk0D94CyeUhOHEpRBNfY",
+    "bsc": "0x715AA1E87D1d0DdcF91a7b3EFC2aD20DC0fC2Dc7",
+    "solana": "A8KA3fgQQkxy34kMaBvxUvMvr3L2H6PrHi1EeB13xURz",
+    "ton": "UQBbfa3cyjjKemaqDjCvJg-ZunVGBNzscDEHtb2h0zSIbV2K",
+    "amb": "0x04D23A48ed678435736977972de399A8C4688C3f"
   }
 ]

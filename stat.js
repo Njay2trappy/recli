@@ -8,108 +8,66 @@ const typeDefs = gql`
     directive @example on FIELD_DEFINITION
     
     type Query {
-        login(email: String!, password: String!): AuthPayload!
-        adminLogin(email: String!, password: String!): AdminAuthPayload!
-        getAllUsers(adminToken: String): [User!]!
-        getDeletedUsers(adminToken: String): [User!]!
-        getTokens(adminToken: String!): [String!]!
-        getWalletAddresses(token: String!): CustodianOrMessage!
-        getUsers(adminToken: String!): UsersOrMessage!
-        queryAPIKey(token: String!): APIKey!
-        getPayment(adminToken: String!): [Payment]
-        getPaymentsByUser(userToken: String, apiKey: String): [Payment]
-    }
-    type TokenPayload {
-        token: String!
+        getPaymentDetailsLink(id: ID!): PaymentLink
+        getLinkedPayments(apiKey: String!): [StartedPayment!]!
+        generateOTP(email: String!): OTPResponse!
     }
     type Mutation {
-        createUser(
-        firstName: String!,
-        lastName: String!,
-        email: String!,
-        password: String!,
-        gender: String,
-        username: String!
-        ): User!
-        createAdmin(
-        firstName: String!,
-        lastName: String!,
-        email: String!,
-        password: String!,
-        username: String!
-        ): Admin! 
-        deleteUser(adminToken: String, userId: ID!): String!
-        logout(token: String!): String!
-        createCustodian(token: String!): CustodianOrMessage!
-        adminSignOut(adminToken: String!): Message!
-        generateAPIKey(token: String!): APIKey!
-        revokeAPIKey(token: String!): APIKey!
-        createSuperKey(adminToken: String!): APIKey!
-        generatePaymentAddress(
-        apiKey: String!
+        generatePaymentLink(apiKey: String!, amount: Float!): PaymentLinkResponse
+        startPaymentLink(id: ID!, blockchain: String!): PaymentDetails
+        changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
+        changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
+        changeUserEmail(token: String, otp: String, newEmail: String!): String!
+    }
+    type PaymentLinkResponse {
+        paymentLink: String!
+        recipientAddresses: [RecipientAddress!]!
         amount: Float!
-        blockchain: String!
+        status: String!
+        createdAt: String!
+        expiresAt: String!
+    }
+    type PaymentDetails {
+        id: ID!
+        walletAddress: String!
+        privateKey: String!
         recipientAddress: String!
-    ): Payment
-    }
-    type APIKey {
-        key: String!
-    }
-    type User {
-        id: ID!
-        firstName: String!
-        lastName: String!
-        email: String!
-        password: String!
-        gender: String
-        username: String!
+        amount: Float!
+        convertedAmount: Float!
+        status: String!
+        blockchain: String!
         createdAt: String!
-        updatedAt: String!
-    }
-
-    type Admin {
-        id: ID!
-        firstName: String!
-        lastName: String!
-        email: String!
-        username: String!
-        createdAt: String!
-    }
-
-    type AuthPayload {
-        token: String!
-        user: User!
-    }
-    type AdminAuthPayload {
-        adminToken: String!
-        admin: Admin!
-    }
-    type Message {
-            message: String!
+        expiresAt: String!
+        startedAt: String!
+        message: String!
         }
-        type CustodianOrMessage {
-        message: String
-        userId: ID
-        email: String
-        bsc: String
-        solana: String
-        ton: String
-        amb: String
+    type PaymentLink {
+        id: ID!
+        email: String!
+        recipientAddresses: [RecipientAddress!]!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        expiresAt: String!
+        completedAt: String
     }
-    type UsersOrMessage {
-        message: String
-        users: [User!]
+    type StartedPayment {
+        id: ID!
+        walletAddress: String!
+        recipientAddress: String!
+        amount: Float!
+        convertedAmount: Float!
+        status: String!
+        blockchain: String!
+        startedAt: String!
+        }
+    type RecipientAddress {
+        blockchain: String!
+        address: String!
     }
-    type Payment {
-    id: ID!
-    walletAddress: String!
-    privateKey: String!
-    recipientAddress: String!
-    amount: Float!
-    status: String!
-    createdAt: String!
-    blockchain: String!
-    convertedAmount: Float!
+    type OTPResponse {
+    otp: String!
+    expiry: String!
     }
 `;
 

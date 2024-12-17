@@ -12,6 +12,8 @@ const { ethers } = require('ethers');
 
 // File paths for JSON storage
 const paymentsFilePath = path.join(__dirname, 'payments.json');
+const paymentLinkFilePath = path.join(__dirname, 'paymentlink.json'); // File to store payment links
+const custodianFilePath = path.join(__dirname, 'custodian.json'); // Path to custodian wallets file
 
 // Admin Wallets
 const BSC_ADMIN_WALLET = "0x15Dc6AB3B9b45821d6c918Ec1b256F6f7470E4DC";
@@ -126,6 +128,8 @@ const typeDefs = gql`
     type Query {
         getPayment(adminToken: String!): [Payment]
         getPaymentsByUser(userToken: String, apiKey: String): [Payment]
+        getPaymentDetailsLink(id: ID!): PaymentLink
+        getLinkedPayments(apiKey: String!): [StartedPayment!]!
     }
     type Mutation {
     generatePaymentAddress(
@@ -134,18 +138,67 @@ const typeDefs = gql`
         blockchain: String!
         recipientAddress: String!
     ): Payment
+    generatePaymentLink(apiKey: String!, amount: Float!): PaymentLinkResponse
+    startPaymentLink(id: ID!, blockchain: String!): PaymentDetails
     }
     type Payment {
-    id: ID!
-    walletAddress: String!
-    privateKey: String!
-    recipientAddress: String!
-    amount: Float!
-    status: String!
-    createdAt: String!
-    blockchain: String!
-    convertedAmount: Float!
+        id: ID!
+        walletAddress: String!
+        privateKey: String!
+        recipientAddress: String!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        blockchain: String!
+        convertedAmount: Float!
     }
+    type PaymentLinkResponse {
+        paymentLink: String!
+        recipientAddresses: [RecipientAddress!]!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        expiresAt: String!
+    }
+    type PaymentDetails {
+        id: ID!
+        walletAddress: String!
+        privateKey: String!
+        recipientAddress: String!
+        amount: Float!
+        convertedAmount: Float!
+        status: String!
+        blockchain: String!
+        createdAt: String!
+        expiresAt: String!
+        startedAt: String!
+        message: String!
+        }
+    type PaymentLink {
+        id: ID!
+        email: String!
+        recipientAddresses: [RecipientAddress!]!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        expiresAt: String!
+        completedAt: String
+    }
+    type StartedPayment {
+        id: ID!
+        walletAddress: String!
+        recipientAddress: String!
+        amount: Float!
+        convertedAmount: Float!
+        status: String!
+        blockchain: String!
+        startedAt: String!
+        }
+    type RecipientAddress {
+        blockchain: String!
+        address: String!
+    }
+
 `;
 
 const createPaymentId = () => {
@@ -182,7 +235,8 @@ const resolvers = {
         
             // Return all payments
             return payments;
-        },        
+        },
+                
         getPaymentsByUser: (_, { userToken, apiKey }) => {
             // Load payments dynamically
             const payments = loadFromFile(paymentsFilePath);
@@ -212,7 +266,63 @@ const resolvers = {
         
             // Filter payments by email
             return payments.filter(payment => payment.email === email);
-        },        
+        },  
+        getPaymentDetailsLink: async (_, { id }) => {
+            try {
+                // Load payment links dynamically
+                const paymentLinks = loadFromFile(paymentLinkFilePath);
+
+                // Find the payment link by ID
+                const payment = paymentLinks.find((link) => link.id === id);
+
+                if (!payment) {
+                    console.error(`No payment found with the ID: ${id}`);
+                    throw new Error(`No payment found with the ID: ${id}`);
+                }
+
+                return payment; // Return the payment details
+            } catch (error) {
+                console.error(`Error fetching payment details for ID: ${id}`, error);
+                throw new Error('An error occurred while fetching payment details.');
+            }
+        },
+        getLinkedPayments: async (_, { apiKey }) => {
+            try {
+                // Load API keys dynamically
+                const apiKeys = loadFromFile(path.join(__dirname, 'apikeys.json'));
+        
+                // Validate the provided API key and fetch user email
+                const apiKeyEntry = apiKeys.find((key) => key.apiKey === apiKey);
+                if (!apiKeyEntry) {
+                    console.error(`Invalid or unauthorized API Key: ${apiKey}`);
+                    throw new Error('Invalid or unauthorized API Key');
+                }
+        
+                const userEmail = apiKeyEntry.userData?.email; // Extract email from user data
+                if (!userEmail) {
+                    console.error(`No email found for API Key: ${apiKey}`);
+                    throw new Error('No email found for the provided API Key');
+                }
+        
+                // Load linked payments dynamically
+                const linkedPayments = loadFromFile(path.join(__dirname, 'linkpay.json'));
+        
+                // Filter payments by user email
+                const userPayments = linkedPayments.filter((payment) => payment.email === userEmail);
+        
+                if (userPayments.length === 0) {
+                    console.log(`No linked payments found for user: ${userEmail}`);
+                    return [];
+                }
+        
+                console.log(`Fetched linked payments for user: ${userEmail}`);
+                return userPayments;
+            } catch (error) {
+                console.error('Error fetching linked payments:', error);
+                throw new Error('An error occurred while fetching linked payments.');
+            }
+        },
+                    
     },
     Mutation: {
         generatePaymentAddress: async (_, { apiKey, amount, blockchain, recipientAddress }) => {
@@ -311,31 +421,220 @@ const resolvers = {
             monitorPayment(newPayment);
         
             return newPayment;
+        },
+        generatePaymentLink: async (_, { apiKey, amount }) => {
+            // Load data dynamically
+            const apiKeys = loadFromFile(apikeysFilePath);
+            const custodianWallets = loadFromFile(custodianFilePath);
+
+            // Validate the API key
+            const apiKeyEntry = apiKeys.find((key) => key.apiKey === apiKey);
+            if (!apiKeyEntry) {
+                throw new Error('Invalid or unauthorized API Key');
+            }
+
+            const userEmail = apiKeyEntry.userData.email.trim().toLowerCase(); // Normalize email
+
+            // Find the custodian wallet linked to the user's email
+            const userCustodian = custodianWallets.find(
+                (entry) => entry.email.trim().toLowerCase() === userEmail
+            );
+
+            if (!userCustodian) {
+                console.error(`No custodian wallet found for email: ${userEmail}`);
+                throw new Error(`No custodian wallet found for email: ${userEmail}`);
+            }
+
+            // Validate the input amount
+            if (amount <= 0) {
+                throw new Error('Amount must be greater than 0');
+            }
+
+            // Map custodian wallets into recipient addresses
+            const recipientAddresses = [
+                { blockchain: 'BSC', address: userCustodian.bsc },
+                { blockchain: 'Solana', address: userCustodian.solana },
+                { blockchain: 'TON', address: userCustodian.ton },
+                { blockchain: 'AMB', address: userCustodian.amb },
+            ].filter((wallet) => wallet.address); // Filter out empty addresses
+
+            if (recipientAddresses.length === 0) {
+                throw new Error(`No valid recipient addresses found for email: ${userEmail}`);
+            }
+
+            // Create a unique payment ID
+            const paymentId = createPaymentId();
+
+            // Generate the current timestamp and expiration timestamp
+            const createdAt = new Date().toISOString();
+            const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes from now
+
+            // Create a new payment link record
+            const newPaymentLink = {
+                id: paymentId,
+                email: userEmail,
+                recipientAddresses,
+                amount,
+                status: 'Pending',
+                createdAt,
+                expiresAt,
+            };
+
+            // Save the payment link in paymentlink.json
+            const paymentLinks = loadFromFile(paymentLinkFilePath);
+            paymentLinks.push(newPaymentLink);
+            saveToFile(paymentLinkFilePath, paymentLinks);
+
+            // Return the generated payment link
+            return {
+                paymentLink: `https://payment-platform.com/pay/${paymentId}`,
+                recipientAddresses,
+                amount,
+                status: newPaymentLink.status,
+                createdAt: newPaymentLink.createdAt,
+                expiresAt: newPaymentLink.expiresAt,
+            };
+        },
+        startPaymentLink: async (_, { id, blockchain }) => {
+            try {
+                // Load payment links dynamically
+                const paymentLinks = loadFromFile(paymentLinkFilePath);
+                const startedPayments = loadFromFile(path.join(__dirname, 'linkpay.json'));
+        
+                // Find the payment link by ID
+                const payment = paymentLinks.find((link) => link.id === id);
+        
+                if (!payment) {
+                    console.error(`No payment found with the ID: ${id}`);
+                    throw new Error(`No payment found with the ID: ${id}`);
+                }
+        
+                // Ensure the link is still valid
+                const currentTime = new Date();
+                if (new Date(payment.expiresAt) < currentTime) {
+                    console.error(`Payment link expired for ID: ${id}`);
+                    throw new Error('This payment link has expired.');
+                }
+        
+                if (payment.status === 'Started') {
+                    console.log(`Payment already started for ID: ${id}`);
+                    return {
+                        paymentLink: `https://payment-platform.com/pay/${id}`,
+                        status: 'Started',
+                        message: 'A payment has already been started for this link.',
+                    };
+                }
+        
+                // Find the recipient address based on the chosen blockchain
+                const recipientAddressEntry = payment.recipientAddresses.find(
+                    (entry) => entry.blockchain === blockchain
+                );
+        
+                if (!recipientAddressEntry) {
+                    console.error(`No recipient address found for blockchain: ${blockchain} and ID: ${id}`);
+                    throw new Error(`No recipient address found for blockchain: ${blockchain}`);
+                }
+        
+                const recipientAddress = recipientAddressEntry.address;
+        
+                // Generate wallet address depending on the blockchain
+                let walletAddress, privateKey, convertedAmount;
+                if (blockchain === 'AMB') {
+                    const wallet = ethers.Wallet.createRandom();
+                    walletAddress = wallet.address;
+                    privateKey = wallet.privateKey;
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else if (blockchain === 'BSC') {
+                    const account = web3.eth.accounts.create();
+                    walletAddress = account.address;
+                    privateKey = account.privateKey;
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else if (blockchain === 'Solana') {
+                    const keypair = Keypair.generate();
+                    walletAddress = keypair.publicKey.toBase58();
+                    privateKey = Buffer.from(keypair.secretKey).toString('hex');
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else if (blockchain === 'TON') {
+                    const keyPair = TonWeb.utils.newKeyPair();
+                    const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, { publicKey: keyPair.publicKey, wc: 0 });
+                    walletAddress = (await wallet.getAddress()).toString(true, true, false); // UQ format
+                    privateKey = TonWeb.utils.bytesToHex(keyPair.secretKey);
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else {
+                    console.error(`Unsupported blockchain: ${blockchain} for ID: ${id}`);
+                    throw new Error('Unsupported blockchain');
+                }
+        
+                // Update the payment status to 'Started'
+                payment.status = 'Started';
+                const updatedPayment = {
+                    ...payment,
+                    walletAddress,
+                    privateKey,
+                    convertedAmount,
+                    recipientAddress,
+                    startedAt: new Date().toISOString(),
+                };
+        
+                saveToFile(paymentLinkFilePath, paymentLinks);
+        
+                // Save to linkpay.json
+                startedPayments.push(updatedPayment);
+                saveToFile(path.join(__dirname, 'linkpay.json'), startedPayments);
+        
+                // Monitor the payment for completion
+                monitorPayment(updatedPayment, id);
+        
+                return {
+                    id: payment.id,
+                    walletAddress,
+                    privateKey,
+                    recipientAddress,
+                    amount: payment.amount,
+                    convertedAmount,
+                    status: payment.status,
+                    blockchain,
+                    createdAt: payment.createdAt,
+                    expiresAt: payment.expiresAt,
+                    startedAt: updatedPayment.startedAt,
+                };
+            } catch (error) {
+                console.error(`Error starting payment link for ID: ${id}`, error);
+                throw new Error('An error occurred while starting the payment.');
+            }
         },        
          
     },
 };
-
-const monitorPayment = async (payment) => {
+ 
+const monitorPayment = async (payment, id) => {
     const { walletAddress, privateKey, recipientAddress, blockchain, convertedAmount } = payment;
     const endTime = Date.now() + 10 * 60 * 1000; // 10 minutes from now
 
     const interval = setInterval(async () => {
-        if (Date.now() >= endTime) {
-            clearInterval(interval);
-            updatePaymentStatus(payment.id, 'Cancelled');
-            console.log(`Payment monitoring timed out for wallet ${walletAddress}`);
-            return;
-        }
-
         try {
+            if (Date.now() >= endTime) {
+                clearInterval(interval);
+                updatePaymentStatus(id, 'Expired');
+                console.error(`Payment monitoring expired for ID: ${id}, wallet: ${walletAddress}`);
+
+                // Update the payment link status to 'Expired'
+                updatePaymentLinkStatus(id, 'Expired');
+                return;
+            }
+
             if (blockchain === 'BSC') {
                 const balance = await web3.eth.getBalance(walletAddress);
                 if (parseFloat(web3.utils.fromWei(balance, 'ether')) >= convertedAmount) {
                     clearInterval(interval);
                     await transferBSCFunds(walletAddress, privateKey, recipientAddress, balance);
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for BSC wallet ${walletAddress}`);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             } else if (blockchain === 'Solana') {
                 const publicKey = new PublicKey(walletAddress);
@@ -343,31 +642,31 @@ const monitorPayment = async (payment) => {
                 if (balance >= convertedAmount * 1e9) { // Converted amount to lamports
                     clearInterval(interval);
                     await transferSolanaFunds(walletAddress, privateKey, recipientAddress, balance);
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for Solana wallet ${walletAddress}`);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             } else if (blockchain === 'TON') {
                 const balance = await tonweb.provider.getBalance(walletAddress);
-                if (balance >= convertedAmount * 1e9) { // Converted amount to nanotons
+                if (balance >= convertedAmount * 1e9) { // Convert TON to nanograms
                     clearInterval(interval);
                     await transferTONFunds(walletAddress, privateKey, recipientAddress, balance);
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for TON wallet ${walletAddress}`);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             } else if (blockchain === 'AMB') {
                 const balance = await provider.getBalance(walletAddress);
-                const balanceInEther = parseFloat(ethers.formatEther(balance));
-                if (balanceInEther >= convertedAmount) {
+                if (parseFloat(ethers.formatEther(balance)) >= convertedAmount) {
                     clearInterval(interval);
-                    await transferAMBFunds(balanceInEther, privateKey, recipientAddress); 
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for AMB wallet ${walletAddress}`);
+                    await transferAmbFunds(walletAddress, privateKey, recipientAddress, balance);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             }
-            
         } catch (error) {
-            console.error(`Error monitoring payment for wallet ${walletAddress}:`, error.message);
-            clearInterval(interval); // Ensure interval is cleared on error
+            console.error(`Error monitoring payment for ID: ${id}, wallet: ${walletAddress}`, error);
         }
     }, 2000); // Check every 2 seconds
 };
@@ -489,6 +788,23 @@ const updatePaymentStatus = (id, status) => {
         saveToFile(paymentsFilePath, payments);
     }
 };
+
+const updatePaymentLinkStatus = (id, status) => {
+    const paymentLinks = loadFromFile(paymentLinkFilePath);
+    const paymentLink = paymentLinks.find((link) => link.id === id);
+
+    if (paymentLink) {
+        paymentLink.status = status;
+        if (status === 'Completed') {
+            paymentLink.completedAt = new Date().toISOString(); // Add completion timestamp
+        }
+        saveToFile(paymentLinkFilePath, paymentLinks);
+        console.log(`Payment link status updated to '${status}' for ID: ${id}`);
+    } else {
+        console.error(`No payment link found for ID: ${id} to update status.`);
+    }
+};
+
 
 const server = new ApolloServer({
     typeDefs,

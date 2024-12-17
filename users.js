@@ -3,6 +3,82 @@ const { startStandaloneServer } = require('@apollo/server/standalone');
 const { gql } = require('graphql-tag');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
+
+// Secret for JWT
+const JWT_SECRET = 'supersecretkey';
+const ADMIN_SECRET = 'adminsecretkey';
+
+// Utility Functions
+const loadFromFile = (filename) => {
+  if (fs.existsSync(filename)) {
+    return JSON.parse(fs.readFileSync(filename));
+  }
+  return [];
+};
+
+const saveToFile = (filename, data) => {
+  fs.writeFileSync(filename, JSON.stringify(data, null, 2));
+};
+
+const validateUserToken = (token) => {
+  try {
+    console.log('Validating user token:', token);
+
+    // Fetch the latest user tokens
+    const userTokens = loadFromFile('tokens.json');
+
+    // Trim token to remove unnecessary whitespace
+    token = token.trim();
+
+    // Check if the token exists in the latest user tokens
+    if (!userTokens.includes(token)) {
+      console.error('Token not found in tokens.json:', token);
+      throw new Error('Unauthorized: Invalid user token');
+    }
+
+    // Decode and verify the token
+    const decoded = jwt.verify(token, JWT_SECRET);
+    return decoded; // Return the decoded payload
+  } catch (err) {
+    console.error('User token validation error:', err.message);
+    throw new Error('Unauthorized: Invalid or expired user token');
+  }
+};
+
+const generateId = (prefix = 'Order') => {
+  // Generate a random string and encode it in base64
+  const randomString = crypto.randomBytes(16).toString('hex');
+  const base64String = Buffer.from(randomString).toString('base64');
+  
+  // Combine the base64 string and prefix
+  return `${base64String}`;
+};
+
+const validateAdminToken = (adminToken) => {
+  try {
+    console.log('Validating admin token:', adminToken);
+
+    // Fetch the latest admin tokens
+    const adminTokens = loadFromFile('adtokens.json');
+
+    // Trim the token to avoid formatting issues
+    adminToken = adminToken.trim();
+
+    // Check if the token exists in the latest admin tokens
+    if (!adminTokens.includes(adminToken)) {
+      console.error('Admin token not found in adtokens.json:', adminToken);
+      throw new Error('Unauthorized: Invalid admin token');
+    }
+
+    // Decode and verify the admin token
+    const decoded = jwt.verify(adminToken, ADMIN_SECRET);
+    return decoded; // Return the decoded payload
+  } catch (err) {
+    console.error('Admin token validation error:', err.message);
+    throw new Error('Unauthorized: Invalid or expired admin token');
+  }
+};
 
 // Define the GraphQL schema
 const typeDefs = gql`
@@ -49,12 +125,12 @@ const typeDefs = gql`
   }
 
   type Admin {
-    id: ID!
-    firstName: String!
-    lastName: String!
-    email: String!
-    username: String!
-    createdAt: String!
+  id: ID!
+  firstName: String!
+  lastName: String!
+  email: String!
+  username: String!
+  createdAt: String!
   }
 
   type AuthPayload {
@@ -68,158 +144,35 @@ const typeDefs = gql`
   }
 `;
 
-// Mock database
-const users = [];
-const admins = [];
-const activeTokens = new Set();
-const tokensFile = 'tokens.json';
-
-const saveTokensToFile = () => {
-  const userTokens = [...activeTokens].filter((token) => {
-    const decoded = jwt.decode(token);
-    return decoded && !decoded.admin; // Filter user tokens
-  });
-
-  const adminTokens = [...activeTokens].filter((token) => {
-    const decoded = jwt.decode(token);
-    return decoded && decoded.admin; // Filter admin tokens
-  });
-
-// Save user tokens
-  fs.writeFileSync(tokensFile, JSON.stringify(userTokens, null, 2));
-
-// Save admin tokens
-  fs.writeFileSync('adtokens.json', JSON.stringify(adminTokens, null, 2));
-};
-
-  
-
-const loadTokensFromFile = () => {
-  if (fs.existsSync(tokensFile)) {
-    return new Set(JSON.parse(fs.readFileSync(tokensFile)));
-  }
-  return new Set();
-};
-
-const loadAdminTokensFromFile = () => {
-  if (fs.existsSync('adtokens.json')) {
-    return new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-  }
-  return new Set();
-};
-
-// On server start, load tokens
-activeTokens.add(...loadTokensFromFile());
-activeTokens.add(...loadAdminTokensFromFile());
-
-
-const revokeToken = (token) => {
-  activeTokens.delete(token);
-  saveTokensToFile();
-};
-
-// Helper function to validate token
-const validateToken = (token, secret) => {
-  if (!activeTokens.has(token)) {
-    throw new Error('Token is invalid or has expired');
-  }
-
-  try {
-    return jwt.verify(token, secret);
-  } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      activeTokens.delete(token);
-      saveTokensToFile();
-      if (secret === ADMIN_SECRET) {
-        fs.writeFileSync('adtokens.json', JSON.stringify([...activeTokens], null, 2));
-      }
-      throw new Error('Token has expired');
-    }
-    throw new Error('Token is invalid');
-  }
-};
-
-
-const saveAdminsToFile = () => {
-  fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
-};
-
-const loadAdminsFromFile = () => {
-  if (fs.existsSync('admins.json')) {
-    return JSON.parse(fs.readFileSync('admins.json'));
-  }
-  return [];
-};
-
-// Load admins on start
-Object.assign(admins, loadAdminsFromFile());
-
-const deletedUsers = [];
-const saveUsersToFile = () => {
-  fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
-};
-const saveDeletedUsersToFile = () => {
-  fs.writeFileSync('spam.json', JSON.stringify(deletedUsers, null, 2));
-};
-const loadUsersFromFile = () => {
-  if (fs.existsSync('users.json')) {
-    return JSON.parse(fs.readFileSync('users.json'));
-  }
-  return [];
-};
-const loadDeletedUsersFromFile = () => {
-  if (fs.existsSync('spam.json')) {
-    return JSON.parse(fs.readFileSync('spam.json'));
-  }
-  return [];
-};
-
-// Load users and deleted users on start
-Object.assign(users, loadUsersFromFile());
-Object.assign(deletedUsers, loadDeletedUsersFromFile());
-
-// Secret for JWT
-const JWT_SECRET = 'supersecretkey';
-const ADMIN_SECRET = 'adminsecretkey';
-
 // Resolver functions
 const resolvers = {
   Query: {
     login: (_, { email, password }) => {
+      const users = loadFromFile('users.json'); // Load users dynamically
       const user = users.find((user) => user.email === email);
+    
       if (!user) {
         throw new Error('User not found');
       }
-
+    
       if (user.password !== password) {
         throw new Error('Invalid password');
       }
-
-      const existingToken = [...activeTokens].find((token) => {
-        try {
-          const decoded = jwt.decode(token);
-          return decoded?.email === email;
-        } catch {
-          return false;
-        }
-      });
-      
-
-      if (existingToken) {
-        throw new Error('User is already logged in');
-      }
-
+    
       const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
         expiresIn: '1h',
       });
-
-      activeTokens.add(token);
-      saveTokensToFile();
-
-      return { token, user: { ...user, password: null } }; // Omit password from response
-    },
+    
+      const userTokens = loadFromFile('tokens.json'); // Always load the latest tokens
+      userTokens.push(token);
+      saveToFile('tokens.json', userTokens); // Save updated tokens
+    
+      return { token, user: { ...user, password: null } };
+    },       
     adminLogin: (_, { email, password }) => {
+      const admins = loadFromFile('admins.json'); // Load admins dynamically
       const admin = admins.find((admin) => admin.email === email);
+    
       if (!admin) {
         throw new Error('Admin not found');
       }
@@ -229,81 +182,52 @@ const resolvers = {
       }
     
       const adminToken = jwt.sign(
-        { id: admin.id, email: admin.email, admin: true }, // Add admin flag
+        { id: admin.id, email: admin.email, admin: true },
         ADMIN_SECRET,
         { expiresIn: '1h' }
       );
     
-      activeTokens.add(adminToken);
+      const adminTokens = loadFromFile('adtokens.json'); // Always load the latest tokens
+      adminTokens.push(adminToken);
+      saveToFile('adtokens.json', adminTokens); // Save updated admin tokens
     
-      // Save to adtokens.json
-      const adminTokens = [...activeTokens].filter((token) => {
-        const decoded = jwt.decode(token);
-        return decoded && decoded.admin;
-      });
-      fs.writeFileSync('adtokens.json', JSON.stringify(adminTokens, null, 2));
-    
-      return { adminToken, admin };
+      // Ensure the resolver returns both the adminToken and the admin object
+      return {
+        adminToken,
+        admin, // Return the valid admin object
+      };
+    },    
+    getAllUsers: (_, { adminToken }) => {
+      validateAdminToken(adminToken); // Dynamically validate admin token
+      const users = loadFromFile('users.json'); // Load users dynamically
+      return users.map((user) => ({ ...user, password: null })); // Return users without passwords
+    },    
+    getDeletedUsers: (_, { adminToken }) => {
+      validateAdminToken(adminToken); // Validate admin token
+      return loadFromFile('spam.json'); // Load deleted users dynamically
     },
-    getAllUsers: (_, { adminToken }, context) => {
-      const token = adminToken || context.token;
-      if (!token) {
-        throw new Error('Admin token is required');
-      }
-    
-      // Load admin tokens from the database
-      const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-    
-      // Check if the token is valid
-      if (!adminTokens.has(token)) {
-        throw new Error('Invalid or expired admin token');
-      }
-    
-      const admin = validateToken(token, ADMIN_SECRET); // Validate the admin token
-      return users.map((user) => ({ ...user, password: null }));
-    },
-    
-    getDeletedUsers: (_, { adminToken }, context) => {
-      const token = adminToken || context.token;
-      if (!token) {
-        throw new Error('Admin token is required');
-      }
-    
-      // Load admin tokens from the database
-      const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-    
-      // Check if the token is valid
-      if (!adminTokens.has(token)) {
-        throw new Error('Invalid or expired admin token');
-      }
-    
-      const admin = validateToken(token, ADMIN_SECRET); // Validate the admin token
-      return deletedUsers;
-    },
+
     getTokens: (_, { adminToken }) => {
-      // Validate the admin token
-      validateToken(adminToken, ADMIN_SECRET);
-    
-      // Load all user tokens from tokens.json
-      const userTokens = JSON.parse(fs.readFileSync('tokens.json'));
-    
-      if (!Array.isArray(userTokens)) {
-        throw new Error('Invalid token storage format');
-      }
-    
-      // Return the list of user tokens
-      return userTokens;
+      validateAdminToken(adminToken); // Validate admin token
+      return loadFromFile('tokens.json'); // Return all user tokens
     },
-    
   },
   Mutation: {
     createUser: (_, { firstName, lastName, email, password, gender, username }) => {
+      const users = loadFromFile('users.json'); // Load users dynamically
+    
+      // Check if the user already exists
       if (users.find((user) => user.email === email)) {
         throw new Error('User already exists');
       }
-
+    
+      // Generate the unique user ID
+      const userId = generateId(); // Use "User" as the suffix
+    
+      // Create a new user
       const newUser = {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,        firstName,
+        id: userId,
+        firstName,
         lastName,
         email,
         password,
@@ -312,76 +236,80 @@ const resolvers = {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-
+    
+      // Add the new user to the database
       users.push(newUser);
-      saveUsersToFile();
-      return { ...newUser, password: null }; // Return user without password
-    },
-    createAdmin: async (_, { firstName, lastName, email, password, username }) => {
+      saveToFile('users.json', users); // Save the updated users list to the file
+    
+      // Return the new user (without the password)
+      return { ...newUser, password: null };
+    },        
+    createAdmin: (_, { firstName, lastName, email, password, username }) => {
+      const admins = loadFromFile('admins.json'); // Load admins dynamically
+    
+      // Check if the admin already exists
       if (admins.find((admin) => admin.email === email)) {
         throw new Error('Admin already exists');
       }
-
+    
+      // Generate the unique admin ID
+      const adminId = generateId(); // Use "Admin" as the suffix
+    
+      // Create a new admin
       const newAdmin = {
-        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,        firstName,
+        id: adminId,
+        firstName,
         lastName,
         email,
         username,
-        password, // Store as plaintext or hashed for security
+        password, // Consider hashing this in production
         createdAt: new Date().toISOString(),
       };
-
+    
+      // Add the new admin to the database
       admins.push(newAdmin);
-      saveAdminsToFile(); // Save admin details to the file
+      saveToFile('admins.json', admins); // Save the updated admins list to the file
+    
+      // Return the new admin (without the password)
+      return { ...newAdmin, password: null };
+    },       
+    deleteUser: (_, { adminToken, userId }) => {
+      validateAdminToken(adminToken); // Validate admin token
+      const users = loadFromFile('users.json'); // Load users dynamically
+      const deletedUsers = loadFromFile('spam.json'); // Load deleted users dynamically
 
-      return newAdmin;
-    },
-    deleteUser: (_, { adminToken, userId }, context) => {
-      const token = adminToken || context.token;
-      if (!token) {
-        throw new Error('Admin token is required');
-      }
-
-      const admin = validateToken(token, ADMIN_SECRET);
-      const usersFromFile = loadUsersFromFile(); // Dynamically load the users from the file
-      const userIndex = usersFromFile.findIndex((user) => user.id === userId);
-
+      const userIndex = users.findIndex((user) => user.id === userId);
       if (userIndex === -1) {
         throw new Error('User not found');
       }
 
-      const [removedUser] = usersFromFile.splice(userIndex, 1); // Remove the user
+      const [removedUser] = users.splice(userIndex, 1);
       deletedUsers.push(removedUser);
 
-      // Save updated users and deleted users to their respective files
-      fs.writeFileSync('users.json', JSON.stringify(usersFromFile, null, 2));
-      saveDeletedUsersToFile();
+      saveToFile('users.json', users); // Save updated users
+      saveToFile('spam.json', deletedUsers); // Save updated deleted users
 
       return `User with ID ${userId} has been deleted.`;
     },
+
     logout: (_, { token }) => {
-        // Load tokens from the appropriate file
-        const userTokens = new Set(JSON.parse(fs.readFileSync('tokens.json')));
-        const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-      
-        // Check if the token is valid in either users or admins
-        if (!userTokens.has(token) && !adminTokens.has(token)) {
-          throw new Error('Invalid or expired token');
-        }
-      
-        // Remove the token from the respective set
-        if (userTokens.has(token)) {
-          userTokens.delete(token);
-          fs.writeFileSync('tokens.json', JSON.stringify([...userTokens], null, 2));
-        } else if (adminTokens.has(token)) {
-          adminTokens.delete(token);
-          fs.writeFileSync('adtokens.json', JSON.stringify([...adminTokens], null, 2));
-        }
-      
-        return 'Successfully logged out';
-      },
-      
+      const userTokens = loadFromFile('tokens.json'); // Fetch the latest user tokens
+      const adminTokens = loadFromFile('adtokens.json'); // Fetch the latest admin tokens
     
+      if (userTokens.includes(token)) {
+        const updatedUserTokens = userTokens.filter((t) => t !== token);
+        saveToFile('tokens.json', updatedUserTokens); // Save updated user tokens
+        return 'Successfully logged out';
+      }
+    
+      if (adminTokens.includes(token)) {
+        const updatedAdminTokens = adminTokens.filter((t) => t !== token);
+        saveToFile('adtokens.json', updatedAdminTokens); // Save updated admin tokens
+        return 'Successfully logged out';
+      }
+    
+      throw new Error('Invalid or expired token');
+    },    
   },
 };
 

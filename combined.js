@@ -1,12 +1,21 @@
 const { ApolloServer } = require('@apollo/server');
 const { startStandaloneServer } = require('@apollo/server/standalone');
 const { gql } = require('graphql-tag');
+const axios = require('axios');
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
+const crypto = require('crypto');
 const fs = require('fs');
 const Web3 = require('web3');
-const { Keypair } = require('@solana/web3.js');
+const { Keypair, Connection, clusterApiUrl, SystemProgram, Transaction, PublicKey } = require('@solana/web3.js');
 const TonWeb = require('tonweb');
 const { ethers } = require('ethers');
 const jwt = require('jsonwebtoken');
+
+// File paths for JSON storage
+const paymentsFilePath = path.join(__dirname, 'payments.json');
+const paymentLinkFilePath = path.join(__dirname, 'paymentlink.json'); // File to store payment links
+const custodianFilePath = path.join(__dirname, 'custodian.json'); // Path to custodian wallets file
 
 // Utility functions to read/write files
 const loadFromFile = (filename) => {
@@ -26,6 +35,94 @@ const saveToFile = (filename, data) => {
     fs.writeFileSync(filename, JSON.stringify(data, null, 2));
 };
 
+const JWT_SECRET = 'supersecretkey';
+const ADMIN_SECRET = 'adminsecretkey';
+
+const validateUserToken = (token) => {
+    try {
+      console.log('Validating user token:', token);
+  
+      // Reload tokens from the file to ensure it's up to date
+      const userTokens = loadFromFile('tokens.json');  
+      // Trim token to remove unnecessary whitespace
+      token = token.trim();
+  
+      // Check if the token exists in tokens.json
+      if (!userTokens.includes(token)) {
+        console.error('Token not found in tokens.json:', token);
+        throw new Error('Unauthorized: Invalid user token');
+      }
+  
+      // Decode and verify the token
+      const decoded = jwt.verify(token, JWT_SECRET); // Ensure JWT_SECRET matches the signing key  
+      return decoded; // Return the decoded payload
+    } catch (err) {
+      throw new Error('Unauthorized: Invalid or expired user token');
+    }
+};
+
+const generateId = (prefix = 'Order') => {
+    // Generate a random string and encode it in base64
+    const randomString = crypto.randomBytes(16).toString('hex');
+    const base64String = Buffer.from(randomString).toString('base64');
+    
+    // Combine the base64 string and prefix
+    return `${base64String}`;
+};
+
+const validateAdminToken = (adminToken) => {
+    try {
+      console.log('Validating admin token:', adminToken);
+  
+      // Reload admin tokens from adtokens.json
+      const adminTokens = loadFromFile('adtokens.json');  
+      // Trim the token to avoid formatting issues
+      adminToken = adminToken.trim();
+  
+      // Check if the token exists in adtokens.json
+      if (!adminTokens.includes(adminToken)) {
+        console.error('Admin token not found in adtokens.json:', adminToken);
+        throw new Error('Unauthorized: Invalid admin token');
+      }
+  
+      // Decode and verify the admin token
+      const decoded = jwt.verify(adminToken, ADMIN_SECRET); // Ensure ADMIN_SECRET matches the signing key  
+      return decoded; // Return the decoded payload
+    } catch (err) {
+      console.error('Admin token validation error:', err.message);
+      throw new Error('Unauthorized: Invalid or expired admin token');
+    }
+};
+
+
+// Helper functions to generate wallet addresses
+const generateBscWalletAddress = () => {
+    const web3 = new Web3('https://bsc-dataseed.binance.org/');
+    const account = web3.eth.accounts.create();
+    return account.address;
+};
+  
+const generateSolanaWalletAddress = () => {
+    const keypair = Keypair.generate();
+    return keypair.publicKey.toBase58();
+};
+  
+const generateTonWalletAddress = async () => {
+    const tonweb = new TonWeb(new TonWeb.HttpProvider('https://testnet.toncenter.com/api/v2/jsonRPC', {
+      apiKey: '8723f42a9a980ba38692832aad3d42fcbe0f0435600c6cd03d403e800bdd2e88'
+    }));
+  
+    const keyPair = TonWeb.utils.newKeyPair();
+    const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, { publicKey: keyPair.publicKey, wc: 0 });
+    const walletAddress = (await wallet.getAddress()).toString(true, true, false);
+    return walletAddress;
+};
+  
+const generateAmbWalletAddress = () => {
+    const wallet = ethers.Wallet.createRandom();
+    return wallet.address;
+};
+  
 
 // Define the GraphQL schema
 const typeDefs = gql`
@@ -40,25 +137,28 @@ const typeDefs = gql`
         queryAPIKey(token: String!): APIKey!
         getPayment(adminToken: String!): [Payment]
         getPaymentsByUser(userToken: String, apiKey: String): [Payment]
+        getPaymentDetailsLink(id: ID!): PaymentLink
+        getLinkedPayments(apiKey: String!): [StartedPayment!]!
+        generateOTP(email: String!): OTPResponse!
     }
     type TokenPayload {
         token: String!
     }
     type Mutation {
         createUser(
-        firstName: String!,
-        lastName: String!,
-        email: String!,
-        password: String!,
-        gender: String,
-        username: String!
+            firstName: String!,
+            lastName: String!,
+            email: String!,
+            password: String!,
+            gender: String,
+            username: String!
         ): User!
         createAdmin(
-        firstName: String!,
-        lastName: String!,
-        email: String!,
-        password: String!,
-        username: String!
+            firstName: String!,
+            lastName: String!,
+            email: String!,
+            password: String!,
+            username: String!
         ): Admin! 
         deleteUser(adminToken: String, userId: ID!): String!
         logout(token: String!): String!
@@ -68,11 +168,16 @@ const typeDefs = gql`
         revokeAPIKey(token: String!): APIKey!
         createSuperKey(adminToken: String!): APIKey!
         generatePaymentAddress(
-        apiKey: String!
-        amount: Float!
-        blockchain: String!
-        recipientAddress: String!
-    ): Payment
+            apiKey: String!
+            amount: Float!
+            blockchain: String!
+            recipientAddress: String!
+        ): Payment
+        generatePaymentLink(apiKey: String!, amount: Float!): PaymentLinkResponse
+        startPaymentLink(id: ID!, blockchain: String!): PaymentDetails
+        changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
+        changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
+        changeUserEmail(token: String, otp: String, newEmail: String!): String!
     }
     type APIKey {
         key: String!
@@ -123,180 +228,112 @@ const typeDefs = gql`
         users: [User!]
     }
     type Payment {
-    id: ID!
-    walletAddress: String!
-    privateKey: String!
-    recipientAddress: String!
-    amount: Float!
-    status: String!
-    createdAt: String!
-    blockchain: String!
-    convertedAmount: Float!
+        id: ID!
+        walletAddress: String!
+        privateKey: String!
+        recipientAddress: String!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        blockchain: String!
+        convertedAmount: Float!
+    }
+    type PaymentLinkResponse {
+        paymentLink: String!
+        recipientAddresses: [RecipientAddress!]!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        expiresAt: String!
+    }
+    type PaymentDetails {
+        id: ID!
+        walletAddress: String!
+        privateKey: String!
+        recipientAddress: String!
+        amount: Float!
+        convertedAmount: Float!
+        status: String!
+        blockchain: String!
+        createdAt: String!
+        expiresAt: String!
+        startedAt: String!
+        message: String!
+        }
+    type PaymentLink {
+        id: ID!
+        email: String!
+        recipientAddresses: [RecipientAddress!]!
+        amount: Float!
+        status: String!
+        createdAt: String!
+        expiresAt: String!
+        completedAt: String
+    }
+    type StartedPayment {
+        id: ID!
+        walletAddress: String!
+        recipientAddress: String!
+        amount: Float!
+        convertedAmount: Float!
+        status: String!
+        blockchain: String!
+        startedAt: String!
+        }
+    type RecipientAddress {
+        blockchain: String!
+        address: String!
+    }
+    type OTPResponse {
+    otp: String!
+    expiry: String!
     }
 `;
 
-// Secret for JWT
-const JWT_SECRET = 'supersecretkey';
-const ADMIN_SECRET = 'adminsecretkey';
+let otpStore = {}; // Temporary store for OTPs
 
-const paymentsFilePath = path.join(__dirname, 'payments.json');
+// Generate OTP function
+const generateOTP = (email, isAdmin) => {
+  const otp = (Math.floor(100000 + Math.random() * 900000)).toString(); // 6-digit OTP
+  const expiry = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // Expires in 15 minutes
 
-const validateUserToken = (token) => {
-    try {
-      console.log('Validating user token:', token);
-  
-      // Reload tokens from the file to ensure it's up to date
-      const userTokens = loadFromFile('tokens.json');  
-      // Trim token to remove unnecessary whitespace
-      token = token.trim();
-  
-      // Check if the token exists in tokens.json
-      if (!userTokens.includes(token)) {
-        console.error('Token not found in tokens.json:', token);
-        throw new Error('Unauthorized: Invalid user token');
-      }
-  
-      // Decode and verify the token
-      const decoded = jwt.verify(token, JWT_SECRET); // Ensure JWT_SECRET matches the signing key  
-      return decoded; // Return the decoded payload
-    } catch (err) {
-      throw new Error('Unauthorized: Invalid or expired user token');
+  const admins = loadFromFile('admins.json');
+  const users = loadFromFile('users.json');
+
+  if (isAdmin) {
+    const admin = admins.find((a) => a.email === email);
+    if (!admin) {
+      throw new Error('Admin email not found');
     }
-};
-
-
-const validateAdminToken = (adminToken) => {
-    try {
-      console.log('Validating admin token:', adminToken);
-  
-      // Reload admin tokens from adtokens.json
-      const adminTokens = loadFromFile('adtokens.json');  
-      // Trim the token to avoid formatting issues
-      adminToken = adminToken.trim();
-  
-      // Check if the token exists in adtokens.json
-      if (!adminTokens.includes(adminToken)) {
-        console.error('Admin token not found in adtokens.json:', adminToken);
-        throw new Error('Unauthorized: Invalid admin token');
-      }
-  
-      // Decode and verify the admin token
-      const decoded = jwt.verify(adminToken, ADMIN_SECRET); // Ensure ADMIN_SECRET matches the signing key  
-      return decoded; // Return the decoded payload
-    } catch (err) {
-      console.error('Admin token validation error:', err.message);
-      throw new Error('Unauthorized: Invalid or expired admin token');
+    otpStore[otp] = { expiry, id: admin.id, type: 'admin' };
+  } else {
+    const user = users.find((u) => u.email === email);
+    if (!user) {
+      throw new Error('User email not found');
     }
-};
-
-
-// Mock database
-const users = [];
-const admins = [];
-const activeTokens = new Set();
-const tokensFile = 'tokens.json';
-
-const saveTokensToFile = () => {
-    const userTokens = [...activeTokens].filter((token) => {
-      const decoded = jwt.decode(token);
-      return decoded && decoded.id && decoded.email && !decoded.admin;
-    });
-  
-    const adminTokens = [...activeTokens].filter((token) => {
-      const decoded = jwt.decode(token);
-      return decoded && decoded.id && decoded.email && decoded.admin;
-    });
-  
-    fs.writeFileSync(tokensFile, JSON.stringify(userTokens, null, 2));
-    fs.writeFileSync('adtokens.json', JSON.stringify(adminTokens, null, 2));
-  };
-  
-
-const loadTokensFromFile = () => {
-  if (fs.existsSync(tokensFile)) {
-    return new Set(JSON.parse(fs.readFileSync(tokensFile)));
+    otpStore[otp] = { expiry, id: user.id, type: 'user' };
   }
-  return new Set();
+
+  setTimeout(() => delete otpStore[otp], 15 * 60 * 1000); // Automatically remove expired OTP
+  return { otp, expiry };
 };
 
-activeTokens.add(...loadTokensFromFile());
-
-const revokeToken = (token) => {
-  activeTokens.delete(token);
-  saveTokensToFile();
-};
-
+// BSC testnet Configuration
 const BSC_TESTNET_RPC = "https://data-seed-prebsc-1-s1.binance.org:8545";
+const web3 = new Web3(BSC_TESTNET_RPC);
 
 // TON testnet configuration
 const tonweb = new TonWeb(new TonWeb.HttpProvider('https://testnet.toncenter.com/api/v2/jsonRPC', {
     apiKey: '8723f42a9a980ba38692832aad3d42fcbe0f0435600c6cd03d403e800bdd2e88',
 }));
 
-const web3 = new Web3(BSC_TESTNET_RPC);
-
 // Initialize Solana Connection
-const solanaConnection = new Connection(clusterApiUrl('devnet'));
+const solanaConnection = new Connection('https://api.devnet.solana.com');
 
-// Helper function to validate token
-const validateToken = (token, secret) => {
-  if (!activeTokens.has(token)) {
-    throw new Error('Token is invalid or has expired');
-  }
+//AMB connection
+const AMB_RPC_URL = "https://network.ambrosus-test.io"; // Replace with your RPC URL if needed
+const provider = new ethers.JsonRpcProvider(AMB_RPC_URL);
 
-  try {
-    return jwt.verify(token, secret);
-  } catch (err) {
-    if (err.name === 'TokenExpiredError') {
-      activeTokens.delete(token);
-      saveTokensToFile();
-      if (secret === ADMIN_SECRET) {
-        fs.writeFileSync('adtokens.json', JSON.stringify([...activeTokens], null, 2));
-      }
-      throw new Error('Token has expired');
-    }
-    throw new Error('Token is invalid');
-  }
-};
-
-
-const saveAdminsToFile = () => {
-  fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
-};
-
-const loadAdminsFromFile = () => {
-  if (fs.existsSync('admins.json')) {
-    return JSON.parse(fs.readFileSync('admins.json'));
-  }
-  return [];
-};
-
-// Load admins on start
-Object.assign(admins, loadAdminsFromFile());
-
-const deletedUsers = [];
-const saveUsersToFile = () => {
-  fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
-};
-const saveDeletedUsersToFile = () => {
-  fs.writeFileSync('spam.json', JSON.stringify(deletedUsers, null, 2));
-};
-const loadUsersFromFile = () => {
-  if (fs.existsSync('users.json')) {
-    return JSON.parse(fs.readFileSync('users.json'));
-  }
-  return [];
-};
-const loadDeletedUsersFromFile = () => {
-  if (fs.existsSync('spam.json')) {
-    return JSON.parse(fs.readFileSync('spam.json'));
-  }
-  return [];
-};
-
-// Load users and deleted users on start
-Object.assign(users, loadUsersFromFile());
-Object.assign(deletedUsers, loadDeletedUsersFromFile());
 
 const fetchLivePrice = async (blockchain) => {
     try {
@@ -352,7 +389,7 @@ const validateWalletAddress = (address, blockchain) => {
     } else if (blockchain === 'TON') {
         try {
             // Validate TON wallet address in UQ format
-            const tonUQRegex = /^[UQ][A-Za-z0-9_-]{47}$/; // Example regex for UQ address format
+            const tonUQRegex = /^[0Q][A-Za-z0-9_-]{47}$/; // Example regex for UQ address format
             return tonUQRegex.test(address);
         } catch (error) {
             return false;
@@ -378,185 +415,142 @@ const createPaymentId = () => {
 
 // Resolver functions
 const resolvers = {
-  Query: {
-    login: (_, { email, password }) => {
+    Query: {
+        login: (_, { email, password }) => {
+            const users = loadFromFile('users.json'); // Load users dynamically
             const user = users.find((user) => user.email === email);
+          
             if (!user) {
-                throw new Error('User not found');
+              throw new Error('User not found');
             }
-
+          
             if (user.password !== password) {
-                throw new Error('Invalid password');
+              throw new Error('Invalid password');
             }
-
-            const existingToken = [...activeTokens].find((token) => {
-                try {
-                const decoded = jwt.decode(token);
-                return decoded?.email === email;
-                } catch {
-                return false;
-                }
-            });
-            
-
-            if (existingToken) {
-                throw new Error('User is already logged in');
-            }
-
+          
             const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, {
-                expiresIn: '1h',
+              expiresIn: '1h',
             });
-
-            activeTokens.add(token);
-            saveTokensToFile();
-
-            return { token, user: { ...user, password: null } }; // Omit password from response
-    },
-    adminLogin: (_, { email, password }) => {
+          
+            const userTokens = loadFromFile('tokens.json'); // Always load the latest tokens
+            userTokens.push(token);
+            saveToFile('tokens.json', userTokens); // Save updated tokens
+          
+            return { token, user: { ...user, password: null } };
+          },       
+          adminLogin: (_, { email, password }) => {
+            const admins = loadFromFile('admins.json'); // Load admins dynamically
             const admin = admins.find((admin) => admin.email === email);
+          
             if (!admin) {
-                throw new Error('Admin not found');
+              throw new Error('Admin not found');
             }
-
+          
             if (admin.password !== password) {
-                throw new Error('Invalid password');
+              throw new Error('Invalid password');
             }
-
-            const existingToken = [...activeTokens].find((token) => {
-                const decoded = jwt.decode(token);
-                return decoded?.email === email;
-            });
-
-            if (existingToken) {
-                throw new Error('Admin is already logged in');
-            }
-
-            const adminToken = jwt.sign({ id: admin.id, email: admin.email }, ADMIN_SECRET, {
-                expiresIn: '1h',
-            });
-
-            activeTokens.add(adminToken);
-            fs.writeFileSync('adtokens.json', JSON.stringify([...activeTokens], null, 2)); // Save admin tokens
-
-            return { adminToken, admin };
-    },
-    getAllUsers: (_, { adminToken }, context) => {
-            const token = adminToken || context.token;
-            if (!token) {
-                throw new Error('Admin token is required');
-            }
-            
-            // Load admin tokens from the database
-            const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-            
-            // Check if the token is valid
-            if (!adminTokens.has(token)) {
-                throw new Error('Invalid or expired admin token');
-            }
-            
-            const admin = validateToken(token, ADMIN_SECRET); // Validate the admin token
-            return users.map((user) => ({ ...user, password: null }));
-    },
-    
-    getDeletedUsers: (_, { adminToken }, context) => {
-            const token = adminToken || context.token;
-            if (!token) {
-                throw new Error('Admin token is required');
-            }
-            
-            // Load admin tokens from the database
-            const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-            
-            // Check if the token is valid
-            if (!adminTokens.has(token)) {
-                throw new Error('Invalid or expired admin token');
-            }
-            
-            const admin = validateToken(token, ADMIN_SECRET); // Validate the admin token
-            return deletedUsers;
-    },
-    getTokens: (_, { adminToken }) => {
-            // Validate the admin token
-            validateToken(adminToken, ADMIN_SECRET);
-            
-            // Load all user tokens from tokens.json
-            const userTokens = JSON.parse(fs.readFileSync('tokens.json'));
-            
-            if (!Array.isArray(userTokens)) {
-                throw new Error('Invalid token storage format');
-            }
-            
-            // Return the list of user tokens
-            return userTokens;
-    },
-    getWalletAddresses: (_, { token }) => {
+          
+            const adminToken = jwt.sign(
+              { id: admin.id, email: admin.email, admin: true },
+              ADMIN_SECRET,
+              { expiresIn: '1h' }
+            );
+          
+            const adminTokens = loadFromFile('adtokens.json'); // Always load the latest tokens
+            adminTokens.push(adminToken);
+            saveToFile('adtokens.json', adminTokens); // Save updated admin tokens
+          
+            // Ensure the resolver returns both the adminToken and the admin object
+            return {
+              adminToken,
+              admin, // Return the valid admin object
+            };
+        },    
+        getAllUsers: (_, { adminToken }) => {
+            validateAdminToken(adminToken); // Dynamically validate admin token
+            const users = loadFromFile('users.json'); // Load users dynamically
+            return users.map((user) => ({ ...user, password: null })); // Return users without passwords
+        },    
+        getDeletedUsers: (_, { adminToken }) => {
+            validateAdminToken(adminToken); // Validate admin token
+            return loadFromFile('spam.json'); // Load deleted users dynamically
+        },
+        getTokens: (_, { adminToken }) => {
+            validateAdminToken(adminToken); // Validate admin token
+            return loadFromFile('tokens.json'); // Return all user tokens
+        },
+        getWalletAddresses: (_, { token }) => {
             // Reload tokens.json to get the latest tokens
             const userTokens = loadFromFile('tokens.json');      
             // Validate the user token
             token = token.trim(); // Trim any whitespace
             if (!userTokens.includes(token)) {
-            console.error('Token not found in tokens.json:', token);
-            throw new Error('Unauthorized: Invalid user token');
+              console.error('Token not found in tokens.json:', token);
+              throw new Error('Unauthorized: Invalid user token');
             }
-        
+          
             // Verify and decode the token
             const decoded = jwt.verify(token, JWT_SECRET); // Ensure JWT_SECRET matches token creation
             console.log('Decoded token:', decoded);
-        
+          
             // Reload custodian.json to get the latest custodian data
             const custodians = loadFromFile('custodian.json');      
             // Find the custodian by email
             const custodian = custodians.find((entry) => entry.email === decoded.email);
             if (!custodian) {
-            console.log(`No custodian account found for user email: ${decoded.email}`);
-            return {
+              console.log(`No custodian account found for user email: ${decoded.email}`);
+              return {
                 message: "No custodian account created for this user",
-            };
+              };
             }
-        
+          
             console.log('Custodian details retrieved successfully:', custodian);
             return custodian;
-    },      
-    getUsers: (_, { adminToken }) => {
+        },
+        getUsers: (_, { adminToken }) => {
             // Validate the admin token
             const decoded = validateAdminToken(adminToken);
             console.log(`Admin authorized to fetch users. Admin email: ${decoded.email}`);
-        
+          
             // Load users from users.json
             const users = loadFromFile('users.json');
             console.log('Loaded users:', users);
-        
+          
             // Return a message if no users exist
             if (!users || users.length === 0) {
-            console.log('No users found in the database.');
-            return {
+              console.log('No users found in the database.');
+              return {
                 message: "No custodian accounts created for users",
                 users: null,
-            };
+              };
             }
-        
+          
             console.log('User list retrieved successfully.');
             return {
-            message: null,
-            users,
+              message: null,
+              users,
             };
-    },
-    queryAPIKey: (_, { token }) => {
+        },
+        queryAPIKey: (_, { token }) => {
             // Validate and decode the token
             const userData = validateUserToken(token);
 
             // Load existing API keys
             const apiKeys = loadFromFile('apikeys.json');
 
-            // Find the API key for the user
-            const userKey = apiKeys.find((key) => key.userId === userData.userId);
+            // Find the API key for the user by email
+            let userKey = apiKeys.find((key) => key.email === userData.email);
             if (!userKey) {
-                throw new Error('API key not found for the provided token.');
+                // Create a new API key if email not found
+                const apiKey = crypto.randomBytes(32).toString('hex');
+                userKey = { email: userData.email, apiKey, userData };
+                apiKeys.push(userKey);
+                saveToFile('apikeys.json', apiKeys);
             }
 
             return { key: userKey.apiKey };
         },
-        etPayment: (_, { adminToken, superKey }) => {
+        getPayment: (_, { adminToken, superKey }) => {
             // Load payments dynamically
             const payments = loadFromFile(paymentsFilePath);
         
@@ -580,7 +574,8 @@ const resolvers = {
         
             // Return all payments
             return payments;
-        },        
+        },
+                
         getPaymentsByUser: (_, { userToken, apiKey }) => {
             // Load payments dynamically
             const payments = loadFromFile(paymentsFilePath);
@@ -610,92 +605,165 @@ const resolvers = {
         
             // Filter payments by email
             return payments.filter(payment => payment.email === email);
-        },            
-    },
-  Mutation: {
-    createUser: (_, { firstName, lastName, email, password, gender, username }) => {
-        if (users.find((user) => user.email === email)) {
-            throw new Error('User already exists');
-        }
+        },  
+        getPaymentDetailsLink: async (_, { id }) => {
+            try {
+                // Load payment links dynamically
+                const paymentLinks = loadFromFile(paymentLinkFilePath);
 
-        const newUser = {
-            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,        firstName,
-            lastName,
-            email,
-            password,
-            gender,
-            username,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-        };
+                // Find the payment link by ID
+                const payment = paymentLinks.find((link) => link.id === id);
 
-        users.push(newUser);
-        saveUsersToFile();
-        return { ...newUser, password: null }; // Return user without password
-    },
-    createAdmin: async (_, { firstName, lastName, email, password, username }) => {
-        if (admins.find((admin) => admin.email === email)) {
-            throw new Error('Admin already exists');
-        }
+                if (!payment) {
+                    console.error(`No payment found with the ID: ${id}`);
+                    throw new Error(`No payment found with the ID: ${id}`);
+                }
 
-        const newAdmin = {
-            id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,        firstName,
-            lastName,
-            email,
-            username,
-            password, // Store as plaintext or hashed for security
-            createdAt: new Date().toISOString(),
-        };
-
-        admins.push(newAdmin);
-        saveAdminsToFile(); // Save admin details to the file
-
-        return newAdmin;
-    },
-    deleteUser: (_, { adminToken, userId }, context) => {
-        const token = adminToken || context.token;
-        if (!token) {
-            throw new Error('Admin token is required');
-        }
-
-        const admin = validateToken(token, ADMIN_SECRET);
-        const usersFromFile = loadUsersFromFile(); // Dynamically load the users from the file
-        const userIndex = usersFromFile.findIndex((user) => user.id === userId);
-
-        if (userIndex === -1) {
-            throw new Error('User not found');
-        }
-
-        const [removedUser] = usersFromFile.splice(userIndex, 1); // Remove the user
-        deletedUsers.push(removedUser);
-
-        // Save updated users and deleted users to their respective files
-        fs.writeFileSync('users.json', JSON.stringify(usersFromFile, null, 2));
-        saveDeletedUsersToFile();
-
-        return `User with ID ${userId} has been deleted.`;
-    },
-    logout: (_, { token }) => {
-            // Load tokens from the appropriate file
-            const userTokens = new Set(JSON.parse(fs.readFileSync('tokens.json')));
-            const adminTokens = new Set(JSON.parse(fs.readFileSync('adtokens.json')));
-        
-            // Check if the token is valid in either users or admins
-            if (!userTokens.has(token) && !adminTokens.has(token)) {
-            throw new Error('Invalid or expired token');
+                return payment; // Return the payment details
+            } catch (error) {
+                console.error(`Error fetching payment details for ID: ${id}`, error);
+                throw new Error('An error occurred while fetching payment details.');
             }
-        
-            // Remove the token from the respective set
-            if (userTokens.has(token)) {
-            userTokens.delete(token);
-            fs.writeFileSync('tokens.json', JSON.stringify([...userTokens], null, 2));
-            } else if (adminTokens.has(token)) {
-            adminTokens.delete(token);
-            fs.writeFileSync('adtokens.json', JSON.stringify([...adminTokens], null, 2));
-            }
-        
-            return 'Successfully logged out';
         },
+        getLinkedPayments: async (_, { apiKey }) => {
+            try {
+                // Load API keys dynamically
+                const apiKeys = loadFromFile(path.join(__dirname, 'apikeys.json'));
+        
+                // Validate the provided API key and fetch user email
+                const apiKeyEntry = apiKeys.find((key) => key.apiKey === apiKey);
+                if (!apiKeyEntry) {
+                    console.error(`Invalid or unauthorized API Key: ${apiKey}`);
+                    throw new Error('Invalid or unauthorized API Key');
+                }
+        
+                const userEmail = apiKeyEntry.userData?.email; // Extract email from user data
+                if (!userEmail) {
+                    console.error(`No email found for API Key: ${apiKey}`);
+                    throw new Error('No email found for the provided API Key');
+                }
+        
+                // Load linked payments dynamically
+                const linkedPayments = loadFromFile(path.join(__dirname, 'linkpay.json'));
+        
+                // Filter payments by user email
+                const userPayments = linkedPayments.filter((payment) => payment.email === userEmail);
+        
+                if (userPayments.length === 0) {
+                    console.log(`No linked payments found for user: ${userEmail}`);
+                    return [];
+                }
+        
+                console.log(`Fetched linked payments for user: ${userEmail}`);
+                return userPayments;
+            } catch (error) {
+                console.error('Error fetching linked payments:', error);
+                throw new Error('An error occurred while fetching linked payments.');
+            }
+        },
+        generateOTP: (_, { email }) => {
+            const admins = loadFromFile('admins.json');
+            const isAdmin = admins.some((a) => a.email === email);
+            return generateOTP(email, isAdmin);
+        },
+    },       
+    Mutation: {
+        createUser: (_, { firstName, lastName, email, password, gender, username }) => {
+            const users = loadFromFile('users.json'); // Load users dynamically
+          
+            // Check if the user already exists
+            if (users.find((user) => user.email === email)) {
+              throw new Error('User already exists');
+            }
+          
+            // Generate the unique user ID
+            const userId = generateId(); // Use "User" as the suffix
+          
+            // Create a new user
+            const newUser = {
+              id: userId,
+              firstName,
+              lastName,
+              email,
+              password,
+              gender,
+              username,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+          
+            // Add the new user to the database
+            users.push(newUser);
+            saveToFile('users.json', users); // Save the updated users list to the file
+          
+            // Return the new user (without the password)
+            return { ...newUser, password: null };
+        },
+        createAdmin: (_, { firstName, lastName, email, password, username }) => {
+            const admins = loadFromFile('admins.json'); // Load admins dynamically
+          
+            // Check if the admin already exists
+            if (admins.find((admin) => admin.email === email)) {
+              throw new Error('Admin already exists');
+            }
+          
+            // Generate the unique admin ID
+            const adminId = generateId(); // Use "Admin" as the suffix
+          
+            // Create a new admin
+            const newAdmin = {
+              id: adminId,
+              firstName,
+              lastName,
+              email,
+              username,
+              password, // Consider hashing this in production
+              createdAt: new Date().toISOString(),
+            };
+          
+            // Add the new admin to the database
+            admins.push(newAdmin);
+            saveToFile('admins.json', admins); // Save the updated admins list to the file
+          
+            // Return the new admin (without the password)
+            return { ...newAdmin, password: null };
+        },       
+        deleteUser: (_, { adminToken, userId }) => {
+            validateAdminToken(adminToken); // Validate admin token
+            const users = loadFromFile('users.json'); // Load users dynamically
+            const deletedUsers = loadFromFile('spam.json'); // Load deleted users dynamically
+      
+            const userIndex = users.findIndex((user) => user.id === userId);
+            if (userIndex === -1) {
+              throw new Error('User not found');
+            }
+      
+            const [removedUser] = users.splice(userIndex, 1);
+            deletedUsers.push(removedUser);
+      
+            saveToFile('users.json', users); // Save updated users
+            saveToFile('spam.json', deletedUsers); // Save updated deleted users
+      
+            return `User with ID ${userId} has been deleted.`;
+        },
+        logout: (_, { token }) => {
+            const userTokens = loadFromFile('tokens.json'); // Fetch the latest user tokens
+            const adminTokens = loadFromFile('adtokens.json'); // Fetch the latest admin tokens
+          
+            if (userTokens.includes(token)) {
+              const updatedUserTokens = userTokens.filter((t) => t !== token);
+              saveToFile('tokens.json', updatedUserTokens); // Save updated user tokens
+              return 'Successfully logged out';
+            }
+          
+            if (adminTokens.includes(token)) {
+              const updatedAdminTokens = adminTokens.filter((t) => t !== token);
+              saveToFile('adtokens.json', updatedAdminTokens); // Save updated admin tokens
+              return 'Successfully logged out';
+            }
+          
+            throw new Error('Invalid or expired token');
+        }, 
         createCustodian: async (_, { token }) => {
             // Validate the user token
             const decoded = validateUserToken(token);
@@ -744,32 +812,31 @@ const resolvers = {
             console.log('New custodian created successfully for user:', user.email);
             return newCustodian;
         },      
-          
         adminSignOut: (_, { adminToken }) => {
             // Load the latest admin tokens from adtokens.json
             const adminTokens = loadFromFile('adtokens.json');
             console.log('Current admin tokens in adtokens.json:', adminTokens);
-          
+            
             // Validate if the provided adminToken exists in the file
             if (!adminTokens.includes(adminToken)) {
-              console.error('Admin token not found in adtokens.json:', adminToken);
-              throw new Error('Unauthorized: Admin token not found or already revoked');
+                console.error('Admin token not found in adtokens.json:', adminToken);
+                throw new Error('Unauthorized: Admin token not found or already revoked');
             }
-          
+            
             // Verify the token using ADMIN_SECRET
             const decoded = jwt.verify(adminToken, ADMIN_SECRET); // Ensure ADMIN_SECRET matches the signing key
             console.log(`Admin token validated successfully. Admin email: ${decoded.email}`);
-          
+            
             // Remove the admin token from the list
             const updatedTokens = adminTokens.filter((token) => token !== adminToken);
-          
+            
             // Save the updated token list back to adtokens.json
             saveToFile('adtokens.json', updatedTokens);
             console.log('Admin token revoked and removed from adtokens.json');
-          
+            
             // Return a success message
             return {
-              message: "Admin token revoked successfully. It is no longer valid.",
+                message: "Admin token revoked successfully. It is no longer valid.",
             };
         },
         generateAPIKey: (_, { token }) => {
@@ -779,17 +846,18 @@ const resolvers = {
             // Load existing API keys
             const apiKeys = loadFromFile('apikeys.json');
 
-            // Check if an API key already exists for the user
-            const existingKeyIndex = apiKeys.findIndex((key) => key.userId === userData.userId);
-            if (existingKeyIndex !== -1) {
-                throw new Error('API key already exists. Revoke the existing key to generate a new one.');
+            // Check if an API key already exists for the user by email
+            let userKey = apiKeys.find((key) => key.email === userData.email);
+            if (userKey) {
+                throw new Error('API key already exists for this user. Revoke the existing key to generate a new one.');
             }
 
             // Generate a random API key
             const apiKey = crypto.randomBytes(32).toString('hex');
 
-            // Save the new API key along with the user data
-            apiKeys.push({ userId: userData.userId, apiKey, userData });
+            // Save the new API key with user email
+            userKey = { email: userData.email, apiKey, userData };
+            apiKeys.push(userKey);
             saveToFile('apikeys.json', apiKeys);
 
             return { key: apiKey };
@@ -801,10 +869,10 @@ const resolvers = {
             // Load existing API keys
             const apiKeys = loadFromFile('apikeys.json');
 
-            // Find and remove the existing API key
-            const existingKeyIndex = apiKeys.findIndex((key) => key.userId === userData.userId);
+            // Find and remove the existing API key by email
+            const existingKeyIndex = apiKeys.findIndex((key) => key.email === userData.email);
             if (existingKeyIndex === -1) {
-                throw new Error('No existing API key found to revoke.');
+                throw new Error('No existing API key found for this user to revoke.');
             }
 
             apiKeys.splice(existingKeyIndex, 1);
@@ -812,15 +880,16 @@ const resolvers = {
             // Generate a new API key
             const newApiKey = crypto.randomBytes(32).toString('hex');
 
-            // Save the new API key along with the user data
-            apiKeys.push({ userId: userData.userId, apiKey: newApiKey, userData });
+            // Save the new API key with user email
+            const newUserKey = { email: userData.email, apiKey: newApiKey, userData };
+            apiKeys.push(newUserKey);
             saveToFile('apikeys.json', apiKeys);
 
             return { key: newApiKey };
         },
         createSuperKey: (_, { adminToken }) => {
             // Validate and decode the admin token
-            validateAdminToken(adminToken);
+            const adminData = validateAdminToken(adminToken);
 
             // Load existing super keys
             const superKeys = loadFromFile('superkeys.json');
@@ -828,8 +897,9 @@ const resolvers = {
             // Generate a new Super API key
             const superApiKey = crypto.randomBytes(64).toString('hex');
 
-            // Save the new super key to superkeys.json
-            superKeys.push({ superApiKey });
+            // Save the new super key with admin email
+            const superKeyEntry = { email: adminData.email, superApiKey };
+            superKeys.push(superKeyEntry);
             saveToFile('superkeys.json', superKeys);
 
             return { key: superApiKey };
@@ -930,30 +1000,330 @@ const resolvers = {
             monitorPayment(newPayment);
         
             return newPayment;
-        }
+        },
+        generatePaymentLink: async (_, { apiKey, amount }) => {
+            // Load data dynamically
+            const apiKeys = loadFromFile(apikeysFilePath);
+            const custodianWallets = loadFromFile(custodianFilePath);
+
+            // Validate the API key
+            const apiKeyEntry = apiKeys.find((key) => key.apiKey === apiKey);
+            if (!apiKeyEntry) {
+                throw new Error('Invalid or unauthorized API Key');
+            }
+
+            const userEmail = apiKeyEntry.userData.email.trim().toLowerCase(); // Normalize email
+
+            // Find the custodian wallet linked to the user's email
+            const userCustodian = custodianWallets.find(
+                (entry) => entry.email.trim().toLowerCase() === userEmail
+            );
+
+            if (!userCustodian) {
+                console.error(`No custodian wallet found for email: ${userEmail}`);
+                throw new Error(`No custodian wallet found for email: ${userEmail}`);
+            }
+
+            // Validate the input amount
+            if (amount <= 0) {
+                throw new Error('Amount must be greater than 0');
+            }
+
+            // Map custodian wallets into recipient addresses
+            const recipientAddresses = [
+                { blockchain: 'BSC', address: userCustodian.bsc },
+                { blockchain: 'Solana', address: userCustodian.solana },
+                { blockchain: 'TON', address: userCustodian.ton },
+                { blockchain: 'AMB', address: userCustodian.amb },
+            ].filter((wallet) => wallet.address); // Filter out empty addresses
+
+            if (recipientAddresses.length === 0) {
+                throw new Error(`No valid recipient addresses found for email: ${userEmail}`);
+            }
+
+            // Create a unique payment ID
+            const paymentId = createPaymentId();
+
+            // Generate the current timestamp and expiration timestamp
+            const createdAt = new Date().toISOString();
+            const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString(); // 30 minutes from now
+
+            // Create a new payment link record
+            const newPaymentLink = {
+                id: paymentId,
+                email: userEmail,
+                recipientAddresses,
+                amount,
+                status: 'Pending',
+                createdAt,
+                expiresAt,
+            };
+
+            // Save the payment link in paymentlink.json
+            const paymentLinks = loadFromFile(paymentLinkFilePath);
+            paymentLinks.push(newPaymentLink);
+            saveToFile(paymentLinkFilePath, paymentLinks);
+
+            // Return the generated payment link
+            return {
+                paymentLink: `https://payment-platform.com/pay/${paymentId}`,
+                recipientAddresses,
+                amount,
+                status: newPaymentLink.status,
+                createdAt: newPaymentLink.createdAt,
+                expiresAt: newPaymentLink.expiresAt,
+            };
+        },
+        startPaymentLink: async (_, { id, blockchain }) => {
+            try {
+                // Load payment links dynamically
+                const paymentLinks = loadFromFile(paymentLinkFilePath);
+                const startedPayments = loadFromFile(path.join(__dirname, 'linkpay.json'));
+        
+                // Find the payment link by ID
+                const payment = paymentLinks.find((link) => link.id === id);
+        
+                if (!payment) {
+                    console.error(`No payment found with the ID: ${id}`);
+                    throw new Error(`No payment found with the ID: ${id}`);
+                }
+        
+                // Ensure the link is still valid
+                const currentTime = new Date();
+                if (new Date(payment.expiresAt) < currentTime) {
+                    console.error(`Payment link expired for ID: ${id}`);
+                    throw new Error('This payment link has expired.');
+                }
+        
+                if (payment.status === 'Started') {
+                    console.log(`Payment already started for ID: ${id}`);
+                    return {
+                        paymentLink: `https://payment-platform.com/pay/${id}`,
+                        status: 'Started',
+                        message: 'A payment has already been started for this link.',
+                    };
+                }
+        
+                // Find the recipient address based on the chosen blockchain
+                const recipientAddressEntry = payment.recipientAddresses.find(
+                    (entry) => entry.blockchain === blockchain
+                );
+        
+                if (!recipientAddressEntry) {
+                    console.error(`No recipient address found for blockchain: ${blockchain} and ID: ${id}`);
+                    throw new Error(`No recipient address found for blockchain: ${blockchain}`);
+                }
+        
+                const recipientAddress = recipientAddressEntry.address;
+        
+                // Generate wallet address depending on the blockchain
+                let walletAddress, privateKey, convertedAmount;
+                if (blockchain === 'AMB') {
+                    const wallet = ethers.Wallet.createRandom();
+                    walletAddress = wallet.address;
+                    privateKey = wallet.privateKey;
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else if (blockchain === 'BSC') {
+                    const account = web3.eth.accounts.create();
+                    walletAddress = account.address;
+                    privateKey = account.privateKey;
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else if (blockchain === 'Solana') {
+                    const keypair = Keypair.generate();
+                    walletAddress = keypair.publicKey.toBase58();
+                    privateKey = Buffer.from(keypair.secretKey).toString('hex');
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else if (blockchain === 'TON') {
+                    const keyPair = TonWeb.utils.newKeyPair();
+                    const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, { publicKey: keyPair.publicKey, wc: 0 });
+                    walletAddress = (await wallet.getAddress()).toString(true, true, false); // UQ format
+                    privateKey = TonWeb.utils.bytesToHex(keyPair.secretKey);
+                    const livePrice = await fetchLivePrice(blockchain);
+                    convertedAmount = payment.amount / livePrice;
+                } else {
+                    console.error(`Unsupported blockchain: ${blockchain} for ID: ${id}`);
+                    throw new Error('Unsupported blockchain');
+                }
+        
+                // Update the payment status to 'Started'
+                payment.status = 'Started';
+                const updatedPayment = {
+                    ...payment,
+                    walletAddress,
+                    privateKey,
+                    convertedAmount,
+                    recipientAddress,
+                    startedAt: new Date().toISOString(),
+                };
+        
+                saveToFile(paymentLinkFilePath, paymentLinks);
+        
+                // Save to linkpay.json
+                startedPayments.push(updatedPayment);
+                saveToFile(path.join(__dirname, 'linkpay.json'), startedPayments);
+        
+                // Monitor the payment for completion
+                monitorPayment(updatedPayment, id);
+        
+                return {
+                    id: payment.id,
+                    walletAddress,
+                    privateKey,
+                    recipientAddress,
+                    amount: payment.amount,
+                    convertedAmount,
+                    status: payment.status,
+                    blockchain,
+                    createdAt: payment.createdAt,
+                    expiresAt: payment.expiresAt,
+                    startedAt: updatedPayment.startedAt,
+                };
+            } catch (error) {
+                console.error(`Error starting payment link for ID: ${id}`, error);
+                throw new Error('An error occurred while starting the payment.');
+            }
+        },
+        changeUserPassword: (_, { token, otp, oldPassword, newPassword }) => {
+            const users = loadFromFile('users.json');
+            if (!token && !otp) {
+              throw new Error('Either token or OTP must be provided');
+            }
+      
+            let user;
+            if (token) {
+              const decoded = validateUserToken(token);
+              user = users.find((u) => u.id === decoded.id);
+              if (!user) {
+                throw new Error('Invalid token or user not found');
+              }
+      
+              if (oldPassword && user.password !== oldPassword) {
+                throw new Error('Old password is incorrect');
+              }
+            }
+      
+            if (otp) {
+              const otpData = otpStore[otp];
+              if (!otpData || new Date() > new Date(otpData.expiry) || otpData.type !== 'user') {
+                throw new Error('Invalid or expired OTP');
+              }
+              user = users.find((u) => u.id === otpData.id);
+              if (!user) {
+                throw new Error('Invalid OTP or user not found');
+              }
+      
+              // Invalidate OTP after use
+              delete otpStore[otp];
+            }
+      
+            if (!user) {
+              throw new Error('Unable to locate user');
+            }
+      
+            user.password = newPassword;
+            saveToFile('users.json', users);
+            return 'User password changed successfully';
+          },
+        changeAdminPassword: (_, { adminToken, otp, oldPassword, newPassword }) => {
+            const admins = loadFromFile('admins.json');
+            if (!adminToken && !otp) {
+              throw new Error('Either adminToken or OTP must be provided');
+            }
+      
+            let admin;
+            if (adminToken) {
+              const decoded = validateAdminToken(adminToken);
+              admin = admins.find((a) => a.id === decoded.id);
+              if (!admin) {
+                throw new Error('Invalid token or admin not found');
+              }
+      
+              if (oldPassword && admin.password !== oldPassword) {
+                throw new Error('Old password is incorrect');
+              }
+            }
+      
+            if (otp) {
+              const otpData = otpStore[otp];
+              if (!otpData || new Date() > new Date(otpData.expiry) || otpData.type !== 'admin') {
+                throw new Error('Invalid or expired OTP');
+              }
+              admin = admins.find((a) => a.id === otpData.id);
+              if (!admin) {
+                throw new Error('Invalid OTP or admin not found');
+              }
+      
+              // Invalidate OTP after use
+              delete otpStore[otp];
+            }
+      
+            if (!admin) {
+              throw new Error('Unable to locate admin');
+            }
+      
+            admin.password = newPassword;
+            saveToFile('admins.json', admins);
+            return 'Admin password changed successfully';
+        },
+        changeUserEmail: (_, { token, otp, newEmail }) => {
+            const users = loadFromFile('users.json');
+            if (!token || !otp) {
+              throw new Error('Both token and OTP must be provided');
+            }
+      
+            const decoded = validateUserToken(token);
+            const user = users.find((u) => u.id === decoded.id);
+            if (!user) {
+              throw new Error('Invalid token or user not found');
+            }
+      
+            const otpData = otpStore[otp];
+            if (!otpData || new Date() > new Date(otpData.expiry) || otpData.type !== 'user' || otpData.id !== user.id) {
+              throw new Error('Invalid or expired OTP');
+            }
+      
+            if (!newEmail || !newEmail.includes('@')) {
+              throw new Error('A valid email address must be provided');
+            }
+      
+            user.email = newEmail;
+            saveToFile('users.json', users);
+      
+            // Invalidate OTP after use
+            delete otpStore[otp];
+      
+            return 'User email changed successfully';
+        },
     },
 };
 
-const monitorPayment = async (payment) => {
+const monitorPayment = async (payment, id) => {
     const { walletAddress, privateKey, recipientAddress, blockchain, convertedAmount } = payment;
     const endTime = Date.now() + 10 * 60 * 1000; // 10 minutes from now
 
     const interval = setInterval(async () => {
-        if (Date.now() >= endTime) {
-            clearInterval(interval);
-            updatePaymentStatus(payment.id, 'Cancelled');
-            console.log(`Payment monitoring timed out for wallet ${walletAddress}`);
-            return;
-        }
-
         try {
+            if (Date.now() >= endTime) {
+                clearInterval(interval);
+                updatePaymentStatus(id, 'Expired');
+                console.error(`Payment monitoring expired for ID: ${id}, wallet: ${walletAddress}`);
+
+                // Update the payment link status to 'Expired'
+                updatePaymentLinkStatus(id, 'Expired');
+                return;
+            }
+
             if (blockchain === 'BSC') {
                 const balance = await web3.eth.getBalance(walletAddress);
                 if (parseFloat(web3.utils.fromWei(balance, 'ether')) >= convertedAmount) {
                     clearInterval(interval);
                     await transferBSCFunds(walletAddress, privateKey, recipientAddress, balance);
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for BSC wallet ${walletAddress}`);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             } else if (blockchain === 'Solana') {
                 const publicKey = new PublicKey(walletAddress);
@@ -961,31 +1331,31 @@ const monitorPayment = async (payment) => {
                 if (balance >= convertedAmount * 1e9) { // Converted amount to lamports
                     clearInterval(interval);
                     await transferSolanaFunds(walletAddress, privateKey, recipientAddress, balance);
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for Solana wallet ${walletAddress}`);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             } else if (blockchain === 'TON') {
                 const balance = await tonweb.provider.getBalance(walletAddress);
-                if (balance >= convertedAmount * 1e9) { // Converted amount to nanotons
+                if (balance >= convertedAmount * 1e9) { // Convert TON to nanograms
                     clearInterval(interval);
                     await transferTONFunds(walletAddress, privateKey, recipientAddress, balance);
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for TON wallet ${walletAddress}`);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             } else if (blockchain === 'AMB') {
                 const balance = await provider.getBalance(walletAddress);
-                const balanceInEther = parseFloat(ethers.formatEther(balance));
-                if (balanceInEther >= convertedAmount) {
+                if (parseFloat(ethers.formatEther(balance)) >= convertedAmount) {
                     clearInterval(interval);
-                    await transferAMBFunds(balanceInEther, privateKey, recipientAddress); 
-                    updatePaymentStatus(payment.id, 'Completed');
-                    console.log(`Payment completed for AMB wallet ${walletAddress}`);
+                    await transferAmbFunds(walletAddress, privateKey, recipientAddress, balance);
+                    updatePaymentStatus(id, 'Completed');
+                    updatePaymentLinkStatus(id, 'Completed');
+                    console.log(`Payment completed for ID: ${id}, wallet: ${walletAddress}`);
                 }
             }
-            
         } catch (error) {
-            console.error(`Error monitoring payment for wallet ${walletAddress}:`, error.message);
-            clearInterval(interval); // Ensure interval is cleared on error
+            console.error(`Error monitoring payment for ID: ${id}, wallet: ${walletAddress}`, error);
         }
     }, 2000); // Check every 2 seconds
 };
@@ -1046,19 +1416,26 @@ const transferSolanaFunds = async (walletAddress, privateKey, recipientAddress, 
 };
 const transferTONFunds = async (walletAddress, privateKey, recipientAddress, nanotons) => {
     try {
+        const keyPair = TonWeb.utils.keyPairFromSecretKey(TonWeb.utils.hexToBytes(privateKey)); // Generate key pair
+
         const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, {
-            publicKey: TonWeb.utils.publicKeyFromHex(privateKey),
-            wc: 0,
+            publicKey: keyPair.publicKey,
+            wc: 0, // Workchain ID (0 is the standard workchain)
         });
 
-        const seqno = 0; // Adjust as needed
-        await wallet.methods.transfer({
-            secretKey: TonWeb.utils.bytesFromHex(privateKey),
-            toAddress: recipientAddress,
-            amount: nanotons, // Amount in nanotons
-            seqno,
-            sendMode: 3,
-        }).send();
+        // Set seqno explicitly to 0 for testing or for new wallets
+        const seqno = 0;
+
+        await wallet.methods
+            .transfer({
+                secretKey: keyPair.secretKey,
+                toAddress: recipientAddress,
+                amount: nanotons, // Amount in nanotons
+                seqno: seqno,
+                sendMode: 3,
+            })
+            .send();
+
         console.log(`Transferred TON funds to recipient address: ${recipientAddress}`);
     } catch (error) {
         console.error(`Error transferring TON funds:`, error.message);
@@ -1101,6 +1478,22 @@ const updatePaymentStatus = (id, status) => {
     }
 };
 
+const updatePaymentLinkStatus = (id, status) => {
+    const paymentLinks = loadFromFile(paymentLinkFilePath);
+    const paymentLink = paymentLinks.find((link) => link.id === id);
+
+    if (paymentLink) {
+        paymentLink.status = status;
+        if (status === 'Completed') {
+            paymentLink.completedAt = new Date().toISOString(); // Add completion timestamp
+        }
+        saveToFile(paymentLinkFilePath, paymentLinks);
+        console.log(`Payment link status updated to '${status}' for ID: ${id}`);
+    } else {
+        console.error(`No payment link found for ID: ${id} to update status.`);
+    }
+};
+
 // Create the Apollo Server
 const server = new ApolloServer({
   typeDefs,
@@ -1114,7 +1507,7 @@ const server = new ApolloServer({
 
 (async () => {
   const { url } = await startStandaloneServer(server, {
-    listen: { port: process.env.PORT || 4002 }, // Use the platform's assigned port or default to 4001
+    listen: { port: process.env.PORT || 4000 }, // Use the platform's assigned port or default to 4001
   });
 
   console.log(`\uD83D\uDE80 Server ready at ${url}`);

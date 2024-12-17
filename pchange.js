@@ -9,6 +9,71 @@ const crypto = require('crypto');
 const JWT_SECRET = 'supersecretkey';
 const ADMIN_SECRET = 'adminsecretkey';
 
+// Utility functions to read/write files
+const loadFromFile = (filename) => {
+    if (!fs.existsSync(filename)) {
+        console.warn(`${filename} not found, initializing with an empty array.`);
+        return [];
+    }
+    try {
+        return JSON.parse(fs.readFileSync(filename, 'utf8'));
+    } catch (error) {
+        console.error(`Error reading or parsing ${filename}:`, error.message);
+        return [];
+    }
+};
+
+const saveToFile = (filename, data) => {
+    fs.writeFileSync(filename, JSON.stringify(data, null, 2));
+};
+
+const validateUserToken = (token) => {
+    try {
+      console.log('Validating user token:', token);
+  
+      // Reload tokens from the file to ensure it's up to date
+      const userTokens = loadFromFile('tokens.json');  
+      // Trim token to remove unnecessary whitespace
+      token = token.trim();
+  
+      // Check if the token exists in tokens.json
+      if (!userTokens.includes(token)) {
+        console.error('Token not found in tokens.json:', token);
+        throw new Error('Unauthorized: Invalid user token');
+      }
+  
+      // Decode and verify the token
+      const decoded = jwt.verify(token, JWT_SECRET); // Ensure JWT_SECRET matches the signing key  
+      return decoded; // Return the decoded payload
+    } catch (err) {
+      throw new Error('Unauthorized: Invalid or expired user token');
+    }
+};
+
+const validateAdminToken = (adminToken) => {
+    try {
+      console.log('Validating admin token:', adminToken);
+  
+      // Reload admin tokens from adtokens.json
+      const adminTokens = loadFromFile('adtokens.json');  
+      // Trim the token to avoid formatting issues
+      adminToken = adminToken.trim();
+  
+      // Check if the token exists in adtokens.json
+      if (!adminTokens.includes(adminToken)) {
+        console.error('Admin token not found in adtokens.json:', adminToken);
+        throw new Error('Unauthorized: Invalid admin token');
+      }
+  
+      // Decode and verify the admin token
+      const decoded = jwt.verify(adminToken, ADMIN_SECRET); // Ensure ADMIN_SECRET matches the signing key  
+      return decoded; // Return the decoded payload
+    } catch (err) {
+      console.error('Admin token validation error:', err.message);
+      throw new Error('Unauthorized: Invalid or expired admin token');
+    }
+};
+
 // Define the GraphQL schema
 const typeDefs = gql`
   type Query {
@@ -39,24 +104,15 @@ const typeDefs = gql`
   }
 `;
 
-// Mock databases
-const users = JSON.parse(fs.readFileSync('users.json', 'utf8')) || [];
-const admins = JSON.parse(fs.readFileSync('admins.json', 'utf8')) || [];
-
 let otpStore = {}; // Temporary store for OTPs
-
-const saveUsersToFile = () => {
-  fs.writeFileSync('users.json', JSON.stringify(users, null, 2));
-};
-
-const saveAdminsToFile = () => {
-  fs.writeFileSync('admins.json', JSON.stringify(admins, null, 2));
-};
 
 // Generate OTP function
 const generateOTP = (email, isAdmin) => {
   const otp = (Math.floor(100000 + Math.random() * 900000)).toString(); // 6-digit OTP
   const expiry = new Date(Date.now() + 15 * 60 * 1000).toISOString(); // Expires in 15 minutes
+
+  const admins = loadFromFile('admins.json');
+  const users = loadFromFile('users.json');
 
   if (isAdmin) {
     const admin = admins.find((a) => a.email === email);
@@ -80,6 +136,7 @@ const generateOTP = (email, isAdmin) => {
 const resolvers = {
   Query: {
     generateOTP: (_, { email }) => {
+      const admins = loadFromFile('admins.json');
       const isAdmin = admins.some((a) => a.email === email);
       return generateOTP(email, isAdmin);
     },
@@ -87,13 +144,14 @@ const resolvers = {
 
   Mutation: {
     changeUserPassword: (_, { token, otp, oldPassword, newPassword }) => {
+      const users = loadFromFile('users.json');
       if (!token && !otp) {
         throw new Error('Either token or OTP must be provided');
       }
 
       let user;
       if (token) {
-        const decoded = jwt.verify(token, JWT_SECRET);
+        const decoded = validateUserToken(token);
         user = users.find((u) => u.id === decoded.id);
         if (!user) {
           throw new Error('Invalid token or user not found');
@@ -123,18 +181,19 @@ const resolvers = {
       }
 
       user.password = newPassword;
-      saveUsersToFile();
+      saveToFile('users.json', users);
       return 'User password changed successfully';
     },
 
     changeAdminPassword: (_, { adminToken, otp, oldPassword, newPassword }) => {
+      const admins = loadFromFile('admins.json');
       if (!adminToken && !otp) {
         throw new Error('Either adminToken or OTP must be provided');
       }
 
       let admin;
       if (adminToken) {
-        const decoded = jwt.verify(adminToken, ADMIN_SECRET);
+        const decoded = validateAdminToken(adminToken);
         admin = admins.find((a) => a.id === decoded.id);
         if (!admin) {
           throw new Error('Invalid token or admin not found');
@@ -164,16 +223,17 @@ const resolvers = {
       }
 
       admin.password = newPassword;
-      saveAdminsToFile();
+      saveToFile('admins.json', admins);
       return 'Admin password changed successfully';
     },
 
     changeUserEmail: (_, { token, otp, newEmail }) => {
+      const users = loadFromFile('users.json');
       if (!token || !otp) {
         throw new Error('Both token and OTP must be provided');
       }
 
-      const decoded = jwt.verify(token, JWT_SECRET);
+      const decoded = validateUserToken(token);
       const user = users.find((u) => u.id === decoded.id);
       if (!user) {
         throw new Error('Invalid token or user not found');
@@ -189,7 +249,7 @@ const resolvers = {
       }
 
       user.email = newEmail;
-      saveUsersToFile();
+      saveToFile('users.json', users);
 
       // Invalidate OTP after use
       delete otpStore[otp];

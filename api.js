@@ -96,10 +96,14 @@ const resolvers = {
             // Load existing API keys
             const apiKeys = loadFromFile('apikeys.json');
 
-            // Find the API key for the user
-            const userKey = apiKeys.find((key) => key.userId === userData.userId);
+            // Find the API key for the user by email
+            let userKey = apiKeys.find((key) => key.email === userData.email);
             if (!userKey) {
-                throw new Error('API key not found for the provided token.');
+                // Create a new API key if email not found
+                const apiKey = crypto.randomBytes(32).toString('hex');
+                userKey = { email: userData.email, apiKey, userData };
+                apiKeys.push(userKey);
+                saveToFile('apikeys.json', apiKeys);
             }
 
             return { key: userKey.apiKey };
@@ -113,17 +117,18 @@ const resolvers = {
             // Load existing API keys
             const apiKeys = loadFromFile('apikeys.json');
 
-            // Check if an API key already exists for the user
-            const existingKeyIndex = apiKeys.findIndex((key) => key.userId === userData.userId);
-            if (existingKeyIndex !== -1) {
-                throw new Error('API key already exists. Revoke the existing key to generate a new one.');
+            // Check if an API key already exists for the user by email
+            let userKey = apiKeys.find((key) => key.email === userData.email);
+            if (userKey) {
+                throw new Error('API key already exists for this user. Revoke the existing key to generate a new one.');
             }
 
             // Generate a random API key
             const apiKey = crypto.randomBytes(32).toString('hex');
 
-            // Save the new API key along with the user data
-            apiKeys.push({ userId: userData.userId, apiKey, userData });
+            // Save the new API key with user email
+            userKey = { email: userData.email, apiKey, userData };
+            apiKeys.push(userKey);
             saveToFile('apikeys.json', apiKeys);
 
             return { key: apiKey };
@@ -135,10 +140,10 @@ const resolvers = {
             // Load existing API keys
             const apiKeys = loadFromFile('apikeys.json');
 
-            // Find and remove the existing API key
-            const existingKeyIndex = apiKeys.findIndex((key) => key.userId === userData.userId);
+            // Find and remove the existing API key by email
+            const existingKeyIndex = apiKeys.findIndex((key) => key.email === userData.email);
             if (existingKeyIndex === -1) {
-                throw new Error('No existing API key found to revoke.');
+                throw new Error('No existing API key found for this user to revoke.');
             }
 
             apiKeys.splice(existingKeyIndex, 1);
@@ -146,15 +151,16 @@ const resolvers = {
             // Generate a new API key
             const newApiKey = crypto.randomBytes(32).toString('hex');
 
-            // Save the new API key along with the user data
-            apiKeys.push({ userId: userData.userId, apiKey: newApiKey, userData });
+            // Save the new API key with user email
+            const newUserKey = { email: userData.email, apiKey: newApiKey, userData };
+            apiKeys.push(newUserKey);
             saveToFile('apikeys.json', apiKeys);
 
             return { key: newApiKey };
         },
         createSuperKey: (_, { adminToken }) => {
             // Validate and decode the admin token
-            validateAdminToken(adminToken);
+            const adminData = validateAdminToken(adminToken);
 
             // Load existing super keys
             const superKeys = loadFromFile('superkeys.json');
@@ -162,8 +168,9 @@ const resolvers = {
             // Generate a new Super API key
             const superApiKey = crypto.randomBytes(64).toString('hex');
 
-            // Save the new super key to superkeys.json
-            superKeys.push({ superApiKey });
+            // Save the new super key with admin email
+            const superKeyEntry = { email: adminData.email, superApiKey };
+            superKeys.push(superKeyEntry);
             saveToFile('superkeys.json', superKeys);
 
             return { key: superApiKey };
