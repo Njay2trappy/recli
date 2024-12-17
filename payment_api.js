@@ -497,6 +497,8 @@ const resolvers = {
         },
         startPaymentLink: async (_, { id, blockchain }) => {
             try {
+                console.log(`Starting payment for ID: ${id} on blockchain: ${blockchain}`);
+        
                 // Load payment links dynamically
                 const paymentLinks = loadFromFile(paymentLinkFilePath);
                 const startedPayments = loadFromFile(path.join(__dirname, 'linkpay.json'));
@@ -516,17 +518,18 @@ const resolvers = {
                     throw new Error('This payment link has expired.');
                 }
         
+                // Ensure the payment is not already started
                 if (payment.status === 'Started') {
-                    console.log(`Payment already started for ID: ${id}`);
+                    console.warn(`Payment already started for ID: ${id}`);
                     return {
+                        message: `Payment for this link has already started.`,
                         paymentLink: `https://payment-platform.com/pay/${id}`,
                         status: 'Started',
-                        message: 'A payment has already been started for this link.',
                     };
                 }
         
                 // Find the recipient address based on the chosen blockchain
-                const recipientAddressEntry = payment.recipientAddresses.find(
+                const recipientAddressEntry = payment.recipientAddresses?.find(
                     (entry) => entry.blockchain === blockchain
                 );
         
@@ -539,34 +542,37 @@ const resolvers = {
         
                 // Generate wallet address depending on the blockchain
                 let walletAddress, privateKey, convertedAmount;
-                if (blockchain === 'AMB') {
-                    const wallet = ethers.Wallet.createRandom();
-                    walletAddress = wallet.address;
-                    privateKey = wallet.privateKey;
+                try {
+                    if (blockchain === 'AMB') {
+                        const wallet = ethers.Wallet.createRandom();
+                        walletAddress = wallet.address;
+                        privateKey = wallet.privateKey;
+                    } else if (blockchain === 'BSC') {
+                        const account = web3.eth.accounts.create();
+                        walletAddress = account.address;
+                        privateKey = account.privateKey;
+                    } else if (blockchain === 'Solana') {
+                        const keypair = Keypair.generate();
+                        walletAddress = keypair.publicKey.toBase58();
+                        privateKey = Buffer.from(keypair.secretKey).toString('hex');
+                    } else if (blockchain === 'TON') {
+                        const keyPair = TonWeb.utils.newKeyPair();
+                        const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, { publicKey: keyPair.publicKey, wc: 0 });
+                        walletAddress = (await wallet.getAddress()).toString(true, true, false); // UQ format
+                        privateKey = TonWeb.utils.bytesToHex(keyPair.secretKey);
+                    } else {
+                        throw new Error('Unsupported blockchain');
+                    }
+        
                     const livePrice = await fetchLivePrice(blockchain);
+                    if (!livePrice || livePrice <= 0) {
+                        throw new Error('Failed to fetch live price');
+                    }
+        
                     convertedAmount = payment.amount / livePrice;
-                } else if (blockchain === 'BSC') {
-                    const account = web3.eth.accounts.create();
-                    walletAddress = account.address;
-                    privateKey = account.privateKey;
-                    const livePrice = await fetchLivePrice(blockchain);
-                    convertedAmount = payment.amount / livePrice;
-                } else if (blockchain === 'Solana') {
-                    const keypair = Keypair.generate();
-                    walletAddress = keypair.publicKey.toBase58();
-                    privateKey = Buffer.from(keypair.secretKey).toString('hex');
-                    const livePrice = await fetchLivePrice(blockchain);
-                    convertedAmount = payment.amount / livePrice;
-                } else if (blockchain === 'TON') {
-                    const keyPair = TonWeb.utils.newKeyPair();
-                    const wallet = new tonweb.wallet.all.v3R2(tonweb.provider, { publicKey: keyPair.publicKey, wc: 0 });
-                    walletAddress = (await wallet.getAddress()).toString(true, true, false); // UQ format
-                    privateKey = TonWeb.utils.bytesToHex(keyPair.secretKey);
-                    const livePrice = await fetchLivePrice(blockchain);
-                    convertedAmount = payment.amount / livePrice;
-                } else {
-                    console.error(`Unsupported blockchain: ${blockchain} for ID: ${id}`);
-                    throw new Error('Unsupported blockchain');
+                } catch (genError) {
+                    console.error(`Error generating wallet for blockchain ${blockchain}:`, genError.message);
+                    throw new Error('Failed to generate wallet or fetch live price.');
                 }
         
                 // Update the payment status to 'Started'
@@ -575,16 +581,19 @@ const resolvers = {
                     ...payment,
                     walletAddress,
                     privateKey,
-                    convertedAmount,
                     recipientAddress,
+                    convertedAmount,
                     startedAt: new Date().toISOString(),
                 };
         
+                // Save the updated payment link
                 saveToFile(paymentLinkFilePath, paymentLinks);
         
                 // Save to linkpay.json
                 startedPayments.push(updatedPayment);
                 saveToFile(path.join(__dirname, 'linkpay.json'), startedPayments);
+        
+                console.log(`Payment successfully started for ID: ${id}`);
         
                 // Monitor the payment for completion
                 monitorPayment(updatedPayment, id);
@@ -592,7 +601,6 @@ const resolvers = {
                 return {
                     id: payment.id,
                     walletAddress,
-                    privateKey,
                     recipientAddress,
                     amount: payment.amount,
                     convertedAmount,
@@ -603,11 +611,10 @@ const resolvers = {
                     startedAt: updatedPayment.startedAt,
                 };
             } catch (error) {
-                console.error(`Error starting payment link for ID: ${id}`, error);
+                console.error(`Error starting payment link for ID: ${id}:`, error.message);
                 throw new Error('An error occurred while starting the payment.');
             }
         },        
-         
     },
 };
  
