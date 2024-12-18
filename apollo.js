@@ -1536,10 +1536,6 @@ const server = new ApolloServer({
   typeDefs,
   resolvers,
   introspection: true, // Enables introspection for Apollo Studio
-  context: ({ req }) => {
-    const token = req.headers.authorization || null;
-    return { token };
-  },
 });
 
 (async () => {
