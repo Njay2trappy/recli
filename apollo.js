@@ -1,3 +1,4 @@
+const { ApolloClient, InMemoryCache } = require('@apollo/client/core');
 const { ApolloServer } = require('@apollo/server');
 const { startStandaloneServer } = require('@apollo/server/standalone');
 const { gql } = require('graphql-tag');
@@ -35,6 +36,14 @@ const loadFromFile = (filename) => {
 const saveToFile = (filename, data) => {
     fs.writeFileSync(filename, JSON.stringify(data, null, 2));
 };
+
+const client = new ApolloClient({
+  uri: 'https://recli.onrender.com/graphql', // Your GraphQL endpoint
+  cache: new InMemoryCache(),
+  headers: {
+    'x-apollo-key': 'service:My-Graph-xlm7p:4e6pmeQtltz18VK0Dn42Vw', // Apollo Key
+  },
+});
 
 const JWT_SECRET = 'supersecretkey';
 const ADMIN_SECRET = 'adminsecretkey';
@@ -134,13 +143,14 @@ const typeDefs = gql`
         getDeletedUsers(adminToken: String): [User!]!
         getTokens(adminToken: String!): [String!]!
         getWalletAddresses(token: String!): CustodianOrMessage!
-        getUsers(adminToken: String!): UsersOrMessage!
+        getCustodians(adminToken: String!): UsersOrMessage!
         queryAPIKey(token: String!): APIKey!
         getPayment(adminToken: String!): [Payment]
         getPaymentsByUser(userToken: String, apiKey: String): [Payment]
         getPaymentDetailsLink(id: ID!): PaymentLink
         getLinkedPayments(apiKey: String!): [StartedPayment!]!
         generateOTP(email: String!): OTPResponse!
+        getUsers(token: String!): User!
     }
     type TokenPayload {
         token: String!
@@ -508,7 +518,7 @@ const resolvers = {
             console.log('Custodian details retrieved successfully:', custodian);
             return custodian;
         },
-        getUsers: (_, { adminToken }) => {
+        getCustodians: (_, { adminToken }) => {
             // Validate the admin token
             const decoded = validateAdminToken(adminToken);
             console.log(`Admin authorized to fetch users. Admin email: ${decoded.email}`);
@@ -661,6 +671,32 @@ const resolvers = {
                 console.error('Error fetching linked payments:', error);
                 throw new Error('An error occurred while fetching linked payments.');
             }
+        },
+        getUsers: (_, { token }) => {
+          // Load the latest tokens database
+          const userTokens = loadFromFile('tokens.json'); // Always fetch the latest tokens
+        
+          // Trim and validate the user token
+          token = token.trim();
+          if (!userTokens.includes(token)) {
+            throw new Error('Unauthorized: Invalid or expired user token');
+          }
+        
+          // Decode the token to get the user email
+          const decoded = jwt.verify(token, JWT_SECRET);
+          const userEmail = decoded.email; // Extract email from the decoded token payload
+        
+          // Load the latest users database
+          const users = loadFromFile('users.json'); // Always fetch the latest users
+        
+          // Find the user corresponding to the email from the token
+          const user = users.find((u) => u.email === userEmail);
+          if (!user) {
+            throw new Error('User not found');
+          }
+        
+          // Return the user's information (excluding the password)
+          return { ...user, password: null };
         },
         generateOTP: (_, { email }) => {
             const admins = loadFromFile('admins.json');

@@ -8,67 +8,24 @@ const typeDefs = gql`
     directive @example on FIELD_DEFINITION
     
     type Query {
-        getPaymentDetailsLink(id: ID!): PaymentLink
-        getLinkedPayments(apiKey: String!): [StartedPayment!]!
-        generateOTP(email: String!): OTPResponse!
+        getUsers(token: String!): User!
+        getCustodians(adminToken: String!): UsersOrMessage!
     }
-    type Mutation {
-        generatePaymentLink(apiKey: String!, amount: Float!): PaymentLinkResponse
-        startPaymentLink(id: ID!, blockchain: String!): PaymentDetails
-        changeUserPassword(token: String, otp: String, oldPassword: String, newPassword: String!): String!
-        changeAdminPassword(adminToken: String, otp: String, oldPassword: String, newPassword: String!): String!
-        changeUserEmail(token: String, otp: String, newEmail: String!): String!
+    type UsersOrMessage {
+        message: String
+        users: [User!]
     }
-    type PaymentLinkResponse {
-        paymentLink: String!
-        recipientAddresses: [RecipientAddress!]!
-        amount: Float!
-        status: String!
-        createdAt: String!
-        expiresAt: String!
-    }
-    type PaymentDetails {
-        id: ID!
-        walletAddress: String!
-        privateKey: String!
-        recipientAddress: String!
-        amount: Float!
-        convertedAmount: Float!
-        status: String!
-        blockchain: String!
-        createdAt: String!
-        expiresAt: String!
-        startedAt: String!
-        message: String!
-        }
-    type PaymentLink {
-        id: ID!
-        email: String!
-        recipientAddresses: [RecipientAddress!]!
-        amount: Float!
-        status: String!
-        createdAt: String!
-        expiresAt: String!
-        completedAt: String
-    }
-    type StartedPayment {
-        id: ID!
-        walletAddress: String!
-        recipientAddress: String!
-        amount: Float!
-        convertedAmount: Float!
-        status: String!
-        blockchain: String!
-        startedAt: String!
-        }
-    type RecipientAddress {
-        blockchain: String!
-        address: String!
-    }
-    type OTPResponse {
-    otp: String!
-    expiry: String!
-    }
+    type User {
+    id: ID!
+    firstName: String!
+    lastName: String!
+    email: String!
+    password: String!
+    gender: String
+    username: String!
+    createdAt: String!
+    updatedAt: String!
+  }
 `;
 
 // Define resolvers (optional for schema generation)

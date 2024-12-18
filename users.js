@@ -88,6 +88,7 @@ const typeDefs = gql`
     getAllUsers(adminToken: String): [User!]!
     getDeletedUsers(adminToken: String): [User!]!
     getTokens(adminToken: String!): [String!]!
+    getUsers(token: String!): User!
   }
   type TokenPayload {
    token: String!
@@ -211,6 +212,32 @@ const resolvers = {
       validateAdminToken(adminToken); // Validate admin token
       return loadFromFile('tokens.json'); // Return all user tokens
     },
+    getUsers: (_, { token }) => {
+      // Load the latest tokens database
+      const userTokens = loadFromFile('tokens.json'); // Always fetch the latest tokens
+    
+      // Trim and validate the user token
+      token = token.trim();
+      if (!userTokens.includes(token)) {
+        throw new Error('Unauthorized: Invalid or expired user token');
+      }
+    
+      // Decode the token to get the user email
+      const decoded = jwt.verify(token, JWT_SECRET);
+      const userEmail = decoded.email; // Extract email from the decoded token payload
+    
+      // Load the latest users database
+      const users = loadFromFile('users.json'); // Always fetch the latest users
+    
+      // Find the user corresponding to the email from the token
+      const user = users.find((u) => u.email === userEmail);
+      if (!user) {
+        throw new Error('User not found');
+      }
+    
+      // Return the user's information (excluding the password)
+      return { ...user, password: null };
+    },    
   },
   Mutation: {
     createUser: (_, { firstName, lastName, email, password, gender, username }) => {

@@ -24,7 +24,7 @@ const saveToFile = (filename, data) => {
 const typeDefs = gql`
     type Query {
         getWalletAddresses(token: String!): CustodianOrMessage!
-        getUsers(adminToken: String!): UsersOrMessage!
+        getCustodians(adminToken: String!): UsersOrMessage!
     }
 
     type Mutation {
@@ -180,7 +180,7 @@ const resolvers = {
         console.log('Custodian details retrieved successfully:', custodian);
         return custodian;
     },      
-    getUsers: (_, { adminToken }) => {
+    getCustodians: (_, { adminToken }) => {
         // Validate the admin token
         const decoded = validateAdminToken(adminToken);
         console.log(`Admin authorized to fetch users. Admin email: ${decoded.email}`);
